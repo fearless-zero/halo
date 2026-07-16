@@ -35,14 +35,8 @@ fn markdown_document(note: &Note) -> String {
     )
 }
 
-fn export_markdown(settings: &Settings, base: &std::path::Path, note: &Note) -> Result<ExportResult> {
-    let folder = integration(settings, "markdown")
-        .and_then(|c| c.options.get("folder"))
-        .filter(|f| !f.trim().is_empty())
-        .map(|f| expand_home(f))
-        .unwrap_or_else(|| base.join("exports"));
+fn write_markdown(folder: PathBuf, note: &Note) -> Result<ExportResult> {
     std::fs::create_dir_all(&folder)?;
-
     let date = note.created_at.split('T').next().unwrap_or("note");
     let file = folder.join(format!("{}-{}.md", sanitize(&note.title), date));
     std::fs::write(&file, markdown_document(note))?;
@@ -51,6 +45,62 @@ fn export_markdown(settings: &Settings, base: &std::path::Path, note: &Note) -> 
         location: Some(file.to_string_lossy().to_string()),
         message: format!("Saved to {}", file.display()),
     })
+}
+
+fn export_markdown(settings: &Settings, base: &std::path::Path, note: &Note) -> Result<ExportResult> {
+    let folder = integration(settings, "markdown")
+        .and_then(|c| c.options.get("folder"))
+        .filter(|f| !f.trim().is_empty())
+        .map(|f| expand_home(f))
+        .unwrap_or_else(|| base.join("exports"));
+    write_markdown(folder, note)
+}
+
+fn export_obsidian(settings: &Settings, note: &Note) -> Result<ExportResult> {
+    let folder = integration(settings, "obsidian")
+        .and_then(|c| c.options.get("folder"))
+        .filter(|f| !f.trim().is_empty())
+        .map(|f| expand_home(f))
+        .ok_or_else(|| anyhow!("Set your Obsidian vault folder in Settings"))?;
+    write_markdown(folder, note)
+}
+
+async fn export_slack(settings: &Settings, note: &Note) -> Result<ExportResult> {
+    let cfg = integration(settings, "slack").ok_or_else(|| anyhow!("Slack not configured"))?;
+    let webhook = cfg.options.get("webhook").filter(|w| !w.trim().is_empty())
+        .ok_or_else(|| anyhow!("Add your Slack incoming webhook URL in Settings"))?;
+    let title = if note.title.is_empty() { "Untitled" } else { &note.title };
+    let text = format!("*{title}*\n\n{}", note.content);
+    let resp = reqwest::Client::new()
+        .post(webhook)
+        .json(&json!({ "text": text }))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("Slack returned {}", resp.status()));
+    }
+    Ok(ExportResult { ok: true, location: None, message: "Posted to Slack".into() })
+}
+
+async fn export_webhook(settings: &Settings, note: &Note) -> Result<ExportResult> {
+    let cfg = integration(settings, "webhook").ok_or_else(|| anyhow!("Webhook not configured"))?;
+    let url = cfg.options.get("url").filter(|u| !u.trim().is_empty())
+        .ok_or_else(|| anyhow!("Add a webhook URL in Settings"))?;
+    let resp = reqwest::Client::new()
+        .post(url)
+        .json(&json!({
+            "id": note.id,
+            "title": note.title,
+            "createdAt": note.created_at,
+            "content": note.content,
+            "durationSecs": note.duration_secs
+        }))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("Webhook returned {}", resp.status()));
+    }
+    Ok(ExportResult { ok: true, location: None, message: "Sent to webhook".into() })
 }
 
 fn export_clipboard(app: &AppHandle, note: &Note, format: &str) -> Result<ExportResult> {
@@ -133,9 +183,11 @@ pub async fn export(
 ) -> ExportResult {
     let result = match target {
         ExportTarget::Markdown => export_markdown(settings, base, note),
+        ExportTarget::Obsidian => export_obsidian(settings, note),
         ExportTarget::Clipboard { format } => export_clipboard(app, note, &format),
         ExportTarget::Notion => export_notion(settings, note).await,
-        ExportTarget::Calendar => Err(anyhow!("Calendar export is not available yet")),
+        ExportTarget::Slack => export_slack(settings, note).await,
+        ExportTarget::Webhook => export_webhook(settings, note).await,
     };
     match result {
         Ok(r) => r,

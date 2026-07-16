@@ -173,7 +173,8 @@ export function HaloProvider({ children }: { children: ReactNode }) {
   const startNewRecording = async () => {
     if (!settings) return;
     try {
-      const note = await api.createNote("New recording");
+      const title = await api.suggestedNoteTitle().catch(() => "New recording");
+      const note = await api.createNote(title);
       setCurrentNote(note);
       activeNoteId.current = note.id;
       await api.startRecording(note.id, settings.inputDeviceId);

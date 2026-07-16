@@ -10,7 +10,7 @@ Built with **Tauri** (Rust backend) + **React** + **TypeScript**.
 - **Transcription** — [whisper.cpp] (Whisper base, MIT) runs on-device.
 - **Note writing** — [llama.cpp] serving **Qwen3-4B-Instruct** (Apache-2.0), a fully-open model, turns the transcript into structured notes using your chosen style.
 - **Storage** — notes live as plain JSON in your app-data directory. No database, no cloud, no account.
-- **Integrations** — Markdown export, clipboard, and Notion; the integration layer is extensible.
+- **Integrations** — Markdown export, Obsidian, clipboard, Notion, Slack, a generic webhook, and Google / Apple / Microsoft calendars (via secret iCal feeds, used to auto-title recordings with the meeting that's happening). The integration layer is extensible.
 
 Both inference engines are bundled with the app as sidecar binaries, and the models are downloaded once on first launch. After setup, Halo works completely offline.
 

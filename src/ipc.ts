@@ -4,6 +4,7 @@ import type {
   AppStatus,
   AudioDevice,
   AudioLevel,
+  CalendarEvent,
   ExportResult,
   ExportTarget,
   ModelDownloadProgress,
@@ -55,6 +56,9 @@ export const api = {
 
   exportNote: (id: string, target: ExportTarget) =>
     invoke<ExportResult>("export_note", { id, target }),
+
+  getCalendarEvents: () => invoke<CalendarEvent[]>("get_calendar_events"),
+  suggestedNoteTitle: () => invoke<string>("suggested_note_title"),
 };
 
 // Event subscriptions. Each returns a promise resolving to an unlisten fn.

@@ -76,9 +76,14 @@ impl Default for Settings {
             capture_microphone: true,
             integrations: vec![
                 IntegrationConfig { id: "markdown".into(), enabled: false, options: HashMap::new() },
+                IntegrationConfig { id: "obsidian".into(), enabled: false, options: HashMap::new() },
                 IntegrationConfig { id: "clipboard".into(), enabled: true, options: HashMap::new() },
                 IntegrationConfig { id: "notion".into(), enabled: false, options: HashMap::new() },
-                IntegrationConfig { id: "calendar".into(), enabled: false, options: HashMap::new() },
+                IntegrationConfig { id: "slack".into(), enabled: false, options: HashMap::new() },
+                IntegrationConfig { id: "webhook".into(), enabled: false, options: HashMap::new() },
+                IntegrationConfig { id: "google-calendar".into(), enabled: false, options: HashMap::new() },
+                IntegrationConfig { id: "apple-calendar".into(), enabled: false, options: HashMap::new() },
+                IntegrationConfig { id: "microsoft-calendar".into(), enabled: false, options: HashMap::new() },
             ],
         }
     }
@@ -159,9 +164,22 @@ pub struct NotesToken {
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum ExportTarget {
     Markdown,
+    Obsidian,
     Clipboard { format: String },
     Notion,
-    Calendar,
+    Slack,
+    Webhook,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarEvent {
+    pub title: String,
+    /// RFC3339 UTC timestamps.
+    pub start: String,
+    pub end: String,
+    /// Provider label, e.g. "Google", "Apple", "Microsoft".
+    pub provider: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

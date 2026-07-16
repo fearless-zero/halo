@@ -9,6 +9,7 @@ export function NoteDetail({ streaming = false }: { streaming?: boolean }) {
   const {
     currentNote,
     styles,
+    settings,
     streamBuffer,
     regenerate,
     updateNoteContent,
@@ -40,6 +41,16 @@ export function NoteDetail({ streaming = false }: { streaming?: boolean }) {
     const res = await api.exportNote(currentNote.id, target);
     notify(res.ok ? res.message : `Export failed: ${res.message}`);
   };
+
+  const exportOptions: Array<{ id: string; label: string; target: ExportTarget }> = [
+    { id: "obsidian", label: "Obsidian", target: { kind: "obsidian" } },
+    { id: "notion", label: "Notion", target: { kind: "notion" } },
+    { id: "slack", label: "Slack", target: { kind: "slack" } },
+    { id: "webhook", label: "Webhook", target: { kind: "webhook" } },
+  ];
+  const extraExports = exportOptions.filter((e) =>
+    settings?.integrations.some((c) => c.id === e.id && c.enabled),
+  );
 
   return (
     <div className="note-detail">
@@ -86,6 +97,11 @@ export function NoteDetail({ streaming = false }: { streaming?: boolean }) {
           <button className="btn btn-sm" onClick={() => void doExport({ kind: "markdown" })}>
             <DownloadIcon width={15} height={15} /> Export .md
           </button>
+          {extraExports.map((e) => (
+            <button key={e.id} className="btn btn-sm" onClick={() => void doExport(e.target)}>
+              {e.label}
+            </button>
+          ))}
           {!streaming && (
             <button className="btn btn-sm" onClick={() => setEditing((v) => !v)}>
               {editing ? "Preview" : "Edit"}

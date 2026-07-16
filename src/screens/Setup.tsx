@@ -3,6 +3,7 @@ import { useHalo } from "../store";
 import { api, events } from "../ipc";
 import type { ModelDownloadProgress } from "../types";
 import { CheckIcon, DownloadIcon, SparkleIcon } from "../components/icons";
+import { integrationLabel } from "../labels";
 
 function fmtSize(bytes: number): string {
   const mb = bytes / (1024 * 1024);
@@ -170,7 +171,7 @@ export function Setup() {
                       })
                     }
                   />
-                  <span className="cap">{cfg.id}</span>
+                  <span>{integrationLabel(cfg.id)}</span>
                 </label>
               ))}
             </div>

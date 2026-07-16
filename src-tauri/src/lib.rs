@@ -1,4 +1,5 @@
 mod audio;
+mod calendar;
 mod commands;
 mod integrations;
 mod llm;
@@ -50,6 +51,8 @@ pub fn run() {
             commands::save_note,
             commands::delete_note,
             commands::export_note,
+            commands::get_calendar_events,
+            commands::suggested_note_title,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

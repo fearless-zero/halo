@@ -238,3 +238,18 @@ pub async fn export_note(
     let settings = state.settings.lock().unwrap().clone();
     Ok(integrations::export(&app, &base, &settings, &note, target).await)
 }
+
+#[tauri::command]
+pub async fn get_calendar_events(state: State<'_, AppState>) -> R<Vec<CalendarEvent>> {
+    let settings = state.settings.lock().unwrap().clone();
+    Ok(crate::calendar::list_events(&settings).await)
+}
+
+#[tauri::command]
+pub async fn suggested_note_title(state: State<'_, AppState>) -> R<String> {
+    let settings = state.settings.lock().unwrap().clone();
+    let events = crate::calendar::list_events(&settings).await;
+    Ok(crate::calendar::current_or_next(&events, chrono::Utc::now())
+        .map(|e| e.title.clone())
+        .unwrap_or_else(|| "New recording".to_string()))
+}
