@@ -1,0 +1,4 @@
+# Sidecar engine binaries are built locally by scripts/fetch-sidecars.sh
+# and are not committed.
+*
+!.gitignore

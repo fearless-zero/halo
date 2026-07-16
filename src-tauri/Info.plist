@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Halo records your microphone so it can transcribe your meetings and write notes on-device.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Halo captures system audio so it can transcribe the other participants in your calls.</string>
+</dict>
+</plist>
