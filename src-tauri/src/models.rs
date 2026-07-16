@@ -45,11 +45,16 @@ fn spec_by_id(id: &str) -> Option<ModelSpec> {
     specs().into_iter().find(|s| s.id == id)
 }
 
+/// A download counts as installed only if it reached ~90% of the expected
+/// size, guarding against truncated downloads.
+fn size_ok(actual: u64, expected: u64) -> bool {
+    actual as f64 >= expected as f64 * 0.9
+}
+
 fn is_installed(spec: &ModelSpec, models_dir: &Path) -> bool {
     let path = models_dir.join(spec.file_name);
     match std::fs::metadata(&path) {
-        // Guard against truncated downloads: require most of the expected size.
-        Ok(meta) => meta.len() as f64 >= spec.approx_size as f64 * 0.9,
+        Ok(meta) => size_ok(meta.len(), spec.approx_size),
         Err(_) => false,
     }
 }
@@ -152,4 +157,56 @@ pub async fn download(app: &AppHandle, models_dir: &Path, ids: Vec<String>) -> R
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn has_two_fully_open_models() {
+        let s = specs();
+        assert_eq!(s.len(), 2);
+        assert!(s.iter().any(|m| m.id == "whisper-base" && m.license == "MIT"));
+        assert!(s.iter().any(|m| m.id == "qwen3-4b" && m.license == "Apache-2.0"));
+    }
+
+    #[test]
+    fn spec_lookup() {
+        assert!(spec_by_id("qwen3-4b").is_some());
+        assert!(spec_by_id("nope").is_none());
+    }
+
+    #[test]
+    fn model_paths_use_expected_filenames() {
+        let dir = Path::new("/models");
+        assert!(whisper_path(dir).ends_with("ggml-base.bin"));
+        assert!(llm_path(dir).ends_with("Qwen3-4B-Instruct-2507-Q4_K_M.gguf"));
+    }
+
+    #[test]
+    fn size_threshold() {
+        assert!(size_ok(90, 100));
+        assert!(size_ok(100, 100));
+        assert!(!size_ok(89, 100));
+    }
+
+    #[test]
+    fn nothing_installed_in_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!all_installed(dir.path()));
+        let infos = model_infos(dir.path());
+        assert_eq!(infos.len(), 2);
+        assert!(infos.iter().all(|m| !m.installed));
+    }
+
+    #[test]
+    fn truncated_file_is_not_installed() {
+        // Exercises the metadata-present branch without writing a ~150MB file:
+        // a small (truncated) file must not count as installed.
+        let dir = tempfile::tempdir().unwrap();
+        let spec = spec_by_id("whisper-base").unwrap();
+        std::fs::write(dir.path().join(spec.file_name), b"partial").unwrap();
+        assert!(!is_installed(&spec, dir.path()));
+    }
 }

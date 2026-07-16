@@ -40,8 +40,8 @@ jobs:
       - name: Typecheck frontend
         run: npm run typecheck
 
-      - name: Unit tests
-        run: npm run test
+      - name: Frontend tests + coverage
+        run: npm run coverage
 
       - name: Build frontend
         run: npx vite build
@@ -55,5 +55,5 @@ jobs:
           printf '' > "src-tauri/binaries/llama-server-$TRIPLE$EXT"
           printf '' > "src-tauri/binaries/whisper-cli-$TRIPLE$EXT"
 
-      - name: Compile-check backend
-        run: cargo check --manifest-path src-tauri/Cargo.toml
+      - name: Backend tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib

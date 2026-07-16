@@ -194,3 +194,80 @@ pub async fn export(
         Err(e) => ExportResult { ok: false, location: None, message: e.to_string() },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::Settings;
+
+    fn note() -> Note {
+        Note {
+            id: "n1".into(),
+            title: "My Meeting".into(),
+            created_at: "2026-07-16T09:30:00Z".into(),
+            updated_at: "2026-07-16T09:30:00Z".into(),
+            style_id: "meeting".into(),
+            content: "## Summary\nWe shipped it.".into(),
+            transcript: None,
+            audio_path: None,
+            duration_secs: 60.0,
+        }
+    }
+
+    fn set_folder(settings: &mut Settings, id: &str, folder: &str) {
+        let cfg = settings.integrations.iter_mut().find(|c| c.id == id).unwrap();
+        cfg.enabled = true;
+        cfg.options.insert("folder".into(), folder.into());
+    }
+
+    #[test]
+    fn sanitize_strips_unsafe_chars() {
+        assert_eq!(sanitize("Team: sync / weekly"), "Team--sync---weekly");
+        assert_eq!(sanitize("   "), "note");
+        assert_eq!(sanitize("Clean Name"), "Clean-Name");
+    }
+
+    #[test]
+    fn expand_home_handles_tilde_and_plain() {
+        assert_eq!(expand_home("/abs/path"), PathBuf::from("/abs/path"));
+        let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap();
+        assert_eq!(expand_home("~/notes"), PathBuf::from(home).join("notes"));
+    }
+
+    #[test]
+    fn markdown_document_has_title_and_body() {
+        let doc = markdown_document(&note());
+        assert!(doc.contains("# My Meeting"));
+        assert!(doc.contains("We shipped it."));
+    }
+
+    #[test]
+    fn markdown_export_writes_to_configured_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = Settings::default();
+        set_folder(&mut settings, "markdown", dir.path().to_str().unwrap());
+        let res = export_markdown(&settings, dir.path(), &note()).unwrap();
+        assert!(res.ok);
+        let contents = std::fs::read_to_string(res.location.unwrap()).unwrap();
+        assert!(contents.contains("# My Meeting"));
+    }
+
+    #[test]
+    fn markdown_export_falls_back_to_base_exports() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::default();
+        let res = export_markdown(&settings, dir.path(), &note()).unwrap();
+        assert!(res.location.unwrap().starts_with(dir.path().join("exports").to_str().unwrap()));
+    }
+
+    #[test]
+    fn obsidian_requires_folder() {
+        let settings = Settings::default();
+        assert!(export_obsidian(&settings, &note()).is_err());
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = Settings::default();
+        set_folder(&mut settings, "obsidian", dir.path().to_str().unwrap());
+        assert!(export_obsidian(&settings, &note()).unwrap().ok);
+    }
+}

@@ -29,3 +29,18 @@ impl AppState {
         storage::models_dir(&self.base_dir)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_state_reads_defaults_and_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(dir.path().to_path_buf());
+        assert_eq!(state.base_dir, dir.path());
+        assert!(state.models_dir().ends_with("models"));
+        assert!(!state.settings.lock().unwrap().setup_complete);
+        assert!(state.recorder.lock().unwrap().is_none());
+    }
+}

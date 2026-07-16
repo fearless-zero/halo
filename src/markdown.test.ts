@@ -44,4 +44,25 @@ describe("renderMarkdown", () => {
     expect(renderMarkdown("hello world")).toContain("<p>hello world</p>");
     expect(renderMarkdown("> quoted")).toContain("<blockquote>quoted</blockquote>");
   });
+
+  it("renders horizontal rules from dashes and asterisks", () => {
+    expect(renderMarkdown("---")).toContain("<hr />");
+    expect(renderMarkdown("***")).toContain("<hr />");
+  });
+
+  it("closes an open list on a blank line", () => {
+    const out = renderMarkdown("- item\n\nafter");
+    expect(out).toContain("<ul>");
+    expect(out).toContain("</ul>");
+    expect(out).toContain("<p>after</p>");
+  });
+
+  it("closes an unterminated code fence at the end", () => {
+    const out = renderMarkdown("```\nleft open");
+    expect(out).toContain("<pre><code>left open</code></pre>");
+  });
+
+  it("escapes quotes in text", () => {
+    expect(renderMarkdown('say "hi"')).toContain("&quot;hi&quot;");
+  });
 });

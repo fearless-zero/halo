@@ -189,3 +189,43 @@ pub struct ExportResult {
     pub location: Option<String>,
     pub message: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_settings() {
+        let s = Settings::default();
+        assert!(!s.setup_complete);
+        assert!(s.capture_system_audio);
+        assert!(s.capture_microphone);
+        assert_eq!(s.default_style_id, "meeting");
+        for id in ["markdown", "slack", "notion", "google-calendar", "apple-calendar", "microsoft-calendar"] {
+            assert!(s.integrations.iter().any(|c| c.id == id), "missing {id}");
+        }
+    }
+
+    #[test]
+    fn settings_serde_roundtrip_is_camel_case() {
+        let json = serde_json::to_string(&Settings::default()).unwrap();
+        assert!(json.contains("setupComplete"));
+        assert!(json.contains("captureSystemAudio"));
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.default_style_id, "meeting");
+    }
+
+    #[test]
+    fn export_target_deserializes_by_kind() {
+        let clip: ExportTarget = serde_json::from_str(r#"{"kind":"clipboard","format":"plain"}"#).unwrap();
+        assert!(matches!(clip, ExportTarget::Clipboard { format } if format == "plain"));
+        assert!(matches!(serde_json::from_str::<ExportTarget>(r#"{"kind":"markdown"}"#).unwrap(), ExportTarget::Markdown));
+        assert!(matches!(serde_json::from_str::<ExportTarget>(r#"{"kind":"slack"}"#).unwrap(), ExportTarget::Slack));
+    }
+
+    #[test]
+    fn model_kind_serializes_lowercase() {
+        assert_eq!(serde_json::to_string(&ModelKind::Whisper).unwrap(), "\"whisper\"");
+        assert_eq!(serde_json::to_string(&ModelKind::Llm).unwrap(), "\"llm\"");
+    }
+}

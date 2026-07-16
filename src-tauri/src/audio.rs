@@ -290,3 +290,60 @@ fn write_wav(path: &Path, samples: &[f32]) -> Result<()> {
     writer.finalize()?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn capture(samples: Vec<f32>, rate: u32) -> Arc<Mutex<CaptureData>> {
+        Arc::new(Mutex::new(CaptureData { samples, sample_rate: rate }))
+    }
+
+    #[test]
+    fn resample_passthrough_and_empty() {
+        assert_eq!(resample_to_target(&[0.1, 0.2], TARGET_RATE), vec![0.1, 0.2]);
+        assert!(resample_to_target(&[], 8000).is_empty());
+    }
+
+    #[test]
+    fn resample_upsamples_length() {
+        let out = resample_to_target(&[0.0, 1.0, 0.0, 1.0], 8000);
+        assert_eq!(out.len(), 8);
+        assert_eq!(out[0], 0.0);
+    }
+
+    #[test]
+    fn mix_averages_sources_and_clamps() {
+        let mixed = mix(&[capture(vec![1.0, -1.0], TARGET_RATE), capture(vec![-1.0, 1.0], TARGET_RATE)]);
+        assert_eq!(mixed, vec![0.0, 0.0]);
+
+        // A single loud source is clamped into range.
+        let loud = mix(&[capture(vec![2.0, -2.0], TARGET_RATE)]);
+        assert_eq!(loud, vec![1.0, -1.0]);
+    }
+
+    #[test]
+    fn mix_handles_uneven_lengths() {
+        let mixed = mix(&[capture(vec![1.0, 1.0], TARGET_RATE), capture(vec![1.0], TARGET_RATE)]);
+        assert_eq!(mixed.len(), 2);
+        assert_eq!(mixed[0], 1.0); // (1+1)/2
+        assert_eq!(mixed[1], 0.5); // (1+0)/2
+    }
+
+    #[test]
+    fn wav_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out.wav");
+        write_wav(&path, &[0.0, 0.5, -0.5]).unwrap();
+        let reader = hound::WavReader::open(&path).unwrap();
+        assert_eq!(reader.spec().sample_rate, TARGET_RATE);
+        assert_eq!(reader.spec().channels, 1);
+        assert_eq!(reader.into_samples::<i16>().count(), 3);
+    }
+
+    #[test]
+    fn list_inputs_does_not_panic() {
+        // Just ensure enumeration runs on the host without panicking.
+        let _ = list_inputs();
+    }
+}

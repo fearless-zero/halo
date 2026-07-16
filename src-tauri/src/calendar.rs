@@ -172,4 +172,59 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 7, 16, 14, 50, 0).unwrap();
         assert_eq!(current_or_next(&events, now).unwrap().title, "Design, review");
     }
+
+    #[test]
+    fn no_event_when_nothing_matches() {
+        let events = parse_ics(SAMPLE, "Google");
+        let now = Utc.with_ymd_and_hms(2026, 7, 16, 20, 0, 0).unwrap();
+        assert!(current_or_next(&events, now).is_none());
+        assert!(current_or_next(&[], now).is_none());
+    }
+
+    #[test]
+    fn unfolds_continuation_lines() {
+        let folded = "SUMMARY:Long\r\n  title\r\nDTSTART:x";
+        let lines = unfold(folded);
+        assert_eq!(lines[0], "SUMMARY:Long title");
+        assert_eq!(lines[1], "DTSTART:x");
+    }
+
+    #[test]
+    fn unescapes_ics_text() {
+        assert_eq!(unescape("a\\,b\\;c\\nd\\\\e"), "a,b;c\nd\\e");
+    }
+
+    #[test]
+    fn parses_datetime_forms() {
+        assert!(parse_dt("20260716T140000Z").is_some());
+        assert!(parse_dt("20260716").is_some()); // date-only
+        assert!(parse_dt("20260716T140000").is_some()); // floating/local
+        assert!(parse_dt("garbage").is_none());
+    }
+
+    #[test]
+    fn missing_dtend_defaults_to_start() {
+        let ics = "BEGIN:VEVENT\r\nSUMMARY:One\r\nDTSTART:20260716T140000Z\r\nEND:VEVENT";
+        let events = parse_ics(ics, "Apple");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].start, events[0].end);
+    }
+
+    #[test]
+    fn event_without_start_is_skipped() {
+        let ics = "BEGIN:VEVENT\r\nSUMMARY:No start\r\nEND:VEVENT";
+        assert!(parse_ics(ics, "Apple").is_empty());
+    }
+
+    #[test]
+    fn defaults_untitled_summary() {
+        let ics = "BEGIN:VEVENT\r\nDTSTART:20260716T140000Z\r\nEND:VEVENT";
+        assert_eq!(parse_ics(ics, "Apple")[0].title, "Untitled event");
+    }
+
+    #[test]
+    fn webcal_becomes_https() {
+        assert_eq!(to_https("webcal://host/cal.ics"), "https://host/cal.ics");
+        assert_eq!(to_https("https://host/cal.ics"), "https://host/cal.ics");
+    }
 }

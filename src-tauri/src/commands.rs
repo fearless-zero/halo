@@ -253,3 +253,34 @@ pub async fn suggested_note_title(state: State<'_, AppState>) -> R<String> {
         .map(|e| e.title.clone())
         .unwrap_or_else(|| "New recording".to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{derive_title, now};
+
+    #[test]
+    fn derive_title_from_heading() {
+        assert_eq!(derive_title("# Meeting notes\n\nbody"), "Meeting notes");
+    }
+
+    #[test]
+    fn derive_title_from_first_text_line() {
+        assert_eq!(derive_title("\n\nFirst real line\nmore"), "First real line");
+    }
+
+    #[test]
+    fn derive_title_empty_is_untitled() {
+        assert_eq!(derive_title("   \n  "), "Untitled note");
+    }
+
+    #[test]
+    fn derive_title_truncates_to_60() {
+        let long = "a".repeat(100);
+        assert_eq!(derive_title(&long).len(), 60);
+    }
+
+    #[test]
+    fn now_is_rfc3339() {
+        assert!(chrono::DateTime::parse_from_rfc3339(&now()).is_ok());
+    }
+}

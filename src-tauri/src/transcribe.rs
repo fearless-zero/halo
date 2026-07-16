@@ -97,8 +97,14 @@ pub async fn transcribe(
     let json_path = out_prefix.with_extension("json");
     let raw = std::fs::read_to_string(&json_path)
         .with_context(|| format!("transcript output missing at {}", json_path.display()))?;
-    let parsed: WhisperJson = serde_json::from_str(&raw).context("could not parse whisper output")?;
+    let transcript = parse_transcript(&raw)?;
+    emit_progress(app, note_id, 100.0);
+    Ok(transcript)
+}
 
+/// Convert whisper.cpp `-oj` JSON into a `Transcript`. Pure and unit-tested.
+fn parse_transcript(raw: &str) -> Result<Transcript> {
+    let parsed: WhisperJson = serde_json::from_str(raw).context("could not parse whisper output")?;
     let segments: Vec<TranscriptSegment> = parsed
         .transcription
         .into_iter()
@@ -109,10 +115,7 @@ pub async fn transcribe(
         })
         .filter(|s| !s.text.is_empty())
         .collect();
-
     let text = segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
-    emit_progress(app, note_id, 100.0);
-
     Ok(Transcript {
         segments,
         text,
@@ -125,4 +128,48 @@ fn parse_progress(line: &str) -> Option<f32> {
     let rest = &line[idx + "progress =".len()..];
     let num: String = rest.chars().skip_while(|c| c.is_whitespace()).take_while(|c| c.is_ascii_digit()).collect();
     num.parse::<f32>().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WHISPER_JSON: &str = r#"{
+        "result": { "language": "en" },
+        "transcription": [
+            { "offsets": { "from": 0, "to": 1500 }, "text": " Hello there" },
+            { "offsets": { "from": 1500, "to": 3000 }, "text": "  " },
+            { "offsets": { "from": 3000, "to": 4200 }, "text": " general" }
+        ]
+    }"#;
+
+    #[test]
+    fn parses_segments_and_joins_text() {
+        let t = parse_transcript(WHISPER_JSON).unwrap();
+        assert_eq!(t.segments.len(), 2, "blank segment should be dropped");
+        assert_eq!(t.segments[0].text, "Hello there");
+        assert_eq!(t.segments[0].start, 0.0);
+        assert_eq!(t.segments[0].end, 1.5);
+        assert_eq!(t.text, "Hello there general");
+        assert_eq!(t.language, "en");
+    }
+
+    #[test]
+    fn defaults_language_when_missing() {
+        let t = parse_transcript(r#"{"transcription":[]}"#).unwrap();
+        assert_eq!(t.language, "en");
+        assert!(t.text.is_empty());
+    }
+
+    #[test]
+    fn errors_on_bad_json() {
+        assert!(parse_transcript("not json").is_err());
+    }
+
+    #[test]
+    fn parses_progress_lines() {
+        assert_eq!(parse_progress("whisper_print_progress: progress =  42%"), Some(42.0));
+        assert_eq!(parse_progress("progress = 7%"), Some(7.0));
+        assert_eq!(parse_progress("no percentage here"), None);
+    }
 }
