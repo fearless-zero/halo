@@ -10,8 +10,6 @@ export default defineConfig({
   build: {
     outDir: "../dist",
     emptyOutDir: true,
-    minify: "esbuild",
-    target: "es2021",
   },
   clearScreen: false,
   server: {
