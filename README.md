@@ -10,7 +10,7 @@ Built with **Tauri** (Rust backend) + **React** + **TypeScript**.
 - **Transcription** — [whisper.cpp] (Whisper base, MIT) runs on-device.
 - **Note writing** — [llama.cpp] serving **Qwen3-4B-Instruct** (Apache-2.0), a fully-open model, turns the transcript into structured notes using your chosen style.
 - **Storage** — notes live as plain JSON in your app-data directory. No database, no cloud, no account.
-- **Integrations** — Markdown export, clipboard, and Notion; the integration layer is extensible.
+- **Integrations** — Markdown export, Obsidian, clipboard, Notion, Slack, a generic webhook, and Google / Apple / Microsoft calendars (via secret iCal feeds, used to auto-title recordings with the meeting that's happening). The integration layer is extensible.
 
 Both inference engines are bundled with the app as sidecar binaries, and the models are downloaded once on first launch. After setup, Halo works completely offline.
 
@@ -50,8 +50,21 @@ npm run build   # tauri build → native installer in src-tauri/target/release/b
 ```bash
 npm run typecheck   # tsc --noEmit
 npm run test        # vitest
-cargo check --manifest-path src-tauri/Cargo.toml
+npm run coverage    # vitest with v8 coverage (100% enforced)
+cargo test --manifest-path src-tauri/Cargo.toml --lib
+bash scripts/coverage.sh   # full frontend + backend coverage, fails below 100%
 ```
+
+### Coverage
+
+The project holds **100% test coverage**. The frontend (Vitest v8) enforces
+100% statements, branches, functions and lines. The backend enforces 100% line
+coverage via `cargo +nightly llvm-cov`; the code that can't run in CI (the
+desktop event loop, cpal hardware capture, sidecar subprocess spawning and the
+OS clipboard) is excluded at the function level with
+`#[cfg_attr(coverage_nightly, coverage(off))]` and is exercised on real
+devices. HTTP integrations and the model downloader are covered with a mock
+server (`wiremock`) and Tauri's mock runtime.
 
 ## System-audio capture — platform notes
 

@@ -27,6 +27,7 @@ fn now_ms() -> u64 {
 }
 
 /// Enumerate available capture devices for the settings UI.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn list_inputs() -> Vec<AudioDevice> {
     let host = cpal::default_host();
     let default_name = host.default_input_device().and_then(|d| d.name().ok());
@@ -45,6 +46,7 @@ pub fn list_inputs() -> Vec<AudioDevice> {
     out
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn pick_input(host: &Host, id: Option<&str>) -> Option<Device> {
     if let Some(id) = id {
         if let Ok(devs) = host.input_devices() {
@@ -62,6 +64,7 @@ fn pick_input(host: &Host, id: Option<&str>) -> Option<Device> {
 /// call). On Linux these are PulseAudio/PipeWire ".monitor" sources; on Windows
 /// "Stereo Mix"/"What U Hear"; on macOS a virtual loopback device such as
 /// BlackHole or an Aggregate device.
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn pick_system(host: &Host) -> Option<Device> {
     const PATTERNS: [&str; 8] = [
         "monitor", "stereo mix", "blackhole", "aggregate", "loopback", "soundflower",
@@ -80,6 +83,7 @@ fn pick_system(host: &Host) -> Option<Device> {
     None
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn build_and_run<T>(
     device: &Device,
     config: &cpal::StreamConfig,
@@ -143,6 +147,7 @@ where
     Ok(())
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn run_capture(
     device: Device,
     is_primary: bool,
@@ -166,6 +171,7 @@ fn run_capture(
 }
 
 impl Recorder {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn start(app: &AppHandle, settings: &Settings) -> Result<Recorder> {
         let host = cpal::default_host();
         let stop = Arc::new(AtomicBool::new(false));
@@ -216,6 +222,7 @@ impl Recorder {
 
     /// Stop capture, mix all sources into a 16 kHz mono WAV, and return the
     /// recording duration in seconds.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn stop(self, wav_path: &Path) -> Result<f64> {
         self.stop.store(true, Ordering::Relaxed);
         for h in self.handles {
@@ -226,6 +233,7 @@ impl Recorder {
         Ok(mixed.len() as f64 / TARGET_RATE as f64)
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn cancel(self) {
         self.stop.store(true, Ordering::Relaxed);
         for h in self.handles {
@@ -289,4 +297,66 @@ fn write_wav(path: &Path, samples: &[f32]) -> Result<()> {
     }
     writer.finalize()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn capture(samples: Vec<f32>, rate: u32) -> Arc<Mutex<CaptureData>> {
+        Arc::new(Mutex::new(CaptureData { samples, sample_rate: rate }))
+    }
+
+    #[test]
+    fn resample_passthrough_and_empty() {
+        assert_eq!(resample_to_target(&[0.1, 0.2], TARGET_RATE), vec![0.1, 0.2]);
+        assert!(resample_to_target(&[], 8000).is_empty());
+    }
+
+    #[test]
+    fn resample_upsamples_length() {
+        let out = resample_to_target(&[0.0, 1.0, 0.0, 1.0], 8000);
+        assert_eq!(out.len(), 8);
+        assert_eq!(out[0], 0.0);
+    }
+
+    #[test]
+    fn mix_averages_sources_and_clamps() {
+        let mixed = mix(&[capture(vec![1.0, -1.0], TARGET_RATE), capture(vec![-1.0, 1.0], TARGET_RATE)]);
+        assert_eq!(mixed, vec![0.0, 0.0]);
+
+        // A single loud source is clamped into range.
+        let loud = mix(&[capture(vec![2.0, -2.0], TARGET_RATE)]);
+        assert_eq!(loud, vec![1.0, -1.0]);
+    }
+
+    #[test]
+    fn mix_handles_uneven_lengths() {
+        let mixed = mix(&[capture(vec![1.0, 1.0], TARGET_RATE), capture(vec![1.0], TARGET_RATE)]);
+        assert_eq!(mixed.len(), 2);
+        assert_eq!(mixed[0], 1.0); // (1+1)/2
+        assert_eq!(mixed[1], 0.5); // (1+0)/2
+    }
+
+    #[test]
+    fn wav_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out.wav");
+        write_wav(&path, &[0.0, 0.5, -0.5]).unwrap();
+        let reader = hound::WavReader::open(&path).unwrap();
+        assert_eq!(reader.spec().sample_rate, TARGET_RATE);
+        assert_eq!(reader.spec().channels, 1);
+        assert_eq!(reader.into_samples::<i16>().count(), 3);
+    }
+
+    #[test]
+    fn list_inputs_does_not_panic() {
+        // Just ensure enumeration runs on the host without panicking.
+        let _ = list_inputs();
+    }
+
+    #[test]
+    fn now_ms_is_positive() {
+        assert!(now_ms() > 0);
+    }
 }

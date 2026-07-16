@@ -1,7 +1,34 @@
 import { useEffect, useState } from "react";
 import { useHalo } from "../store";
 import { api } from "../ipc";
+import { integrationLabel } from "../labels";
 import type { AudioDevice, IntegrationConfig, NoteStyle } from "../types";
+
+interface Field {
+  key: string;
+  placeholder: string;
+  help?: string;
+}
+
+const INTEGRATION_FIELDS: Record<string, Field[]> = {
+  markdown: [{ key: "folder", placeholder: "Folder for .md files (e.g. ~/Notes/Halo)" }],
+  obsidian: [{ key: "folder", placeholder: "Path to your Obsidian vault (e.g. ~/Obsidian/Notes)" }],
+  notion: [
+    { key: "token", placeholder: "Notion integration token (secret_…)" },
+    { key: "database", placeholder: "Notion database ID" },
+  ],
+  slack: [{ key: "webhook", placeholder: "Slack incoming webhook URL" }],
+  webhook: [{ key: "url", placeholder: "POST notes as JSON to this URL" }],
+  "google-calendar": [
+    { key: "ics", placeholder: "Secret iCal (.ics) URL", help: "Google Calendar → Settings → your calendar → Secret address in iCal format" },
+  ],
+  "apple-calendar": [
+    { key: "ics", placeholder: "Public iCal (.ics) URL", help: "Calendar app → right-click calendar → Share → Public Calendar" },
+  ],
+  "microsoft-calendar": [
+    { key: "ics", placeholder: "Published iCal (.ics) URL", help: "Outlook → Settings → Calendar → Shared calendars → Publish → ICS link" },
+  ],
+};
 
 function IntegrationEditor({
   cfg,
@@ -13,6 +40,8 @@ function IntegrationEditor({
   const setOption = (key: string, value: string) =>
     onChange({ ...cfg, options: { ...cfg.options, [key]: value } });
 
+  const fields = INTEGRATION_FIELDS[cfg.id] ?? [];
+
   return (
     <div className="setting-block">
       <label className="checkbox-row">
@@ -21,24 +50,20 @@ function IntegrationEditor({
           checked={cfg.enabled}
           onChange={(e) => onChange({ ...cfg, enabled: e.target.checked })}
         />
-        <span className="cap">{cfg.id}</span>
+        <span>{integrationLabel(cfg.id)}</span>
       </label>
-      {cfg.enabled && cfg.id === "markdown" && (
-        <input
-          className="text-input"
-          placeholder="Folder to save .md files (e.g. ~/Notes/Halo)"
-          value={cfg.options.folder ?? ""}
-          onChange={(e) => setOption("folder", e.target.value)}
-        />
-      )}
-      {cfg.enabled && cfg.id === "notion" && (
-        <input
-          className="text-input"
-          placeholder="Notion integration token"
-          value={cfg.options.token ?? ""}
-          onChange={(e) => setOption("token", e.target.value)}
-        />
-      )}
+      {cfg.enabled &&
+        fields.map((f) => (
+          <div key={f.key} className="setting-block">
+            <input
+              className="text-input"
+              placeholder={f.placeholder}
+              value={cfg.options[f.key] ?? ""}
+              onChange={(e) => setOption(f.key, e.target.value)}
+            />
+            {f.help && <span className="field-label">{f.help}</span>}
+          </div>
+        ))}
     </div>
   );
 }
@@ -57,6 +82,7 @@ function StyleEditor() {
     });
 
   const save = async () => {
+    /* v8 ignore next -- Save only renders when a draft exists */
     if (!draft) return;
     await api.saveNoteStyle(draft);
     setDraft(null);

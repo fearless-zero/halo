@@ -193,3 +193,128 @@ pub fn list_notes(base: &Path) -> Result<Vec<NoteSummary>> {
     out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{Note, NoteStyle};
+
+    fn base() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        ensure_dirs(dir.path()).unwrap();
+        dir
+    }
+
+    fn sample_note(id: &str, content: &str) -> Note {
+        Note {
+            id: id.to_string(),
+            title: "T".into(),
+            created_at: "2026-07-16T10:00:00Z".into(),
+            updated_at: "2026-07-16T10:00:00Z".into(),
+            style_id: "meeting".into(),
+            content: content.into(),
+            transcript: None,
+            audio_path: None,
+            duration_secs: 12.0,
+        }
+    }
+
+    #[test]
+    fn settings_default_when_missing_then_roundtrip() {
+        let d = base();
+        assert!(!load_settings(d.path()).setup_complete);
+        let mut s = load_settings(d.path());
+        s.setup_complete = true;
+        s.default_style_id = "lecture".into();
+        save_settings(d.path(), &s).unwrap();
+        let loaded = load_settings(d.path());
+        assert!(loaded.setup_complete);
+        assert_eq!(loaded.default_style_id, "lecture");
+    }
+
+    #[test]
+    fn builtin_styles_present() {
+        let styles = builtin_styles();
+        assert_eq!(styles.len(), 5);
+        assert!(styles.iter().all(|s| s.builtin));
+        assert!(styles.iter().any(|s| s.id == "meeting"));
+    }
+
+    #[test]
+    fn custom_style_crud_and_builtin_flag() {
+        let d = base();
+        let custom = NoteStyle {
+            id: "mine".into(),
+            name: "Mine".into(),
+            description: "d".into(),
+            prompt: "p {transcript}".into(),
+            builtin: false,
+        };
+        let saved = save_style(d.path(), &custom).unwrap();
+        assert!(!saved.builtin);
+        // Saving the same id again updates the existing custom entry in place.
+        let mut renamed = custom.clone();
+        renamed.name = "Renamed".into();
+        save_style(d.path(), &renamed).unwrap();
+        assert_eq!(get_style(d.path(), "mine").unwrap().name, "Renamed");
+        assert!(load_styles(d.path()).iter().any(|s| s.id == "mine"));
+
+        // Editing a builtin keeps it flagged builtin.
+        let mut edited = get_style(d.path(), "meeting").unwrap();
+        edited.prompt = "changed".into();
+        assert!(save_style(d.path(), &edited).unwrap().builtin);
+
+        delete_style(d.path(), "mine").unwrap();
+        assert!(get_style(d.path(), "mine").is_none());
+    }
+
+    #[test]
+    fn note_crud_and_listing() {
+        let d = base();
+        assert!(list_notes(d.path()).unwrap().is_empty());
+
+        save_note(d.path(), &sample_note("a", "# Heading\n- point one")).unwrap();
+        save_note(d.path(), &sample_note("b", "plain body")).unwrap();
+
+        let list = list_notes(d.path()).unwrap();
+        assert_eq!(list.len(), 2);
+        let a = list.iter().find(|n| n.id == "a").unwrap();
+        assert!(a.preview.contains("Heading"));
+        assert!(!a.preview.contains('#'));
+
+        assert_eq!(load_note(d.path(), "b").unwrap().content, "plain body");
+
+        delete_note(d.path(), "a").unwrap();
+        assert!(load_note(d.path(), "a").is_err());
+        assert_eq!(list_notes(d.path()).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn list_notes_on_missing_dir_is_empty() {
+        let d = tempfile::tempdir().unwrap(); // no ensure_dirs: notes/ does not exist
+        assert!(list_notes(d.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn list_notes_ignores_non_json_and_corrupt_files() {
+        let d = base();
+        save_note(d.path(), &sample_note("good", "body")).unwrap();
+        std::fs::write(d.path().join("notes").join("readme.txt"), "not a note").unwrap();
+        std::fs::write(d.path().join("notes").join("broken.json"), "{ not valid json").unwrap();
+        // A directory with a .json name passes the extension check but fails to read.
+        std::fs::create_dir(d.path().join("notes").join("adir.json")).unwrap();
+        let list = list_notes(d.path()).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, "good");
+    }
+
+    #[test]
+    fn malformed_files_fall_back_to_defaults() {
+        let d = base();
+        std::fs::write(d.path().join("settings.json"), "{ broken").unwrap();
+        assert!(!load_settings(d.path()).setup_complete);
+
+        std::fs::write(custom_styles_path(d.path()), "{ broken").unwrap();
+        assert!(load_styles(d.path()).iter().any(|s| s.id == "meeting"));
+    }
+}

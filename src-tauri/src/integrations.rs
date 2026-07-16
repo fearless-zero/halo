@@ -2,7 +2,7 @@ use crate::types::{ExportResult, ExportTarget, IntegrationConfig, Note, Settings
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 fn integration<'a>(settings: &'a Settings, id: &str) -> Option<&'a IntegrationConfig> {
@@ -35,14 +35,8 @@ fn markdown_document(note: &Note) -> String {
     )
 }
 
-fn export_markdown(settings: &Settings, base: &std::path::Path, note: &Note) -> Result<ExportResult> {
-    let folder = integration(settings, "markdown")
-        .and_then(|c| c.options.get("folder"))
-        .filter(|f| !f.trim().is_empty())
-        .map(|f| expand_home(f))
-        .unwrap_or_else(|| base.join("exports"));
+fn write_markdown(folder: PathBuf, note: &Note) -> Result<ExportResult> {
     std::fs::create_dir_all(&folder)?;
-
     let date = note.created_at.split('T').next().unwrap_or("note");
     let file = folder.join(format!("{}-{}.md", sanitize(&note.title), date));
     std::fs::write(&file, markdown_document(note))?;
@@ -53,7 +47,66 @@ fn export_markdown(settings: &Settings, base: &std::path::Path, note: &Note) -> 
     })
 }
 
-fn export_clipboard(app: &AppHandle, note: &Note, format: &str) -> Result<ExportResult> {
+fn export_markdown(settings: &Settings, base: &std::path::Path, note: &Note) -> Result<ExportResult> {
+    let folder = integration(settings, "markdown")
+        .and_then(|c| c.options.get("folder"))
+        .filter(|f| !f.trim().is_empty())
+        .map(|f| expand_home(f))
+        .unwrap_or_else(|| base.join("exports"));
+    write_markdown(folder, note)
+}
+
+fn export_obsidian(settings: &Settings, note: &Note) -> Result<ExportResult> {
+    let folder = integration(settings, "obsidian")
+        .and_then(|c| c.options.get("folder"))
+        .filter(|f| !f.trim().is_empty())
+        .map(|f| expand_home(f))
+        .ok_or_else(|| anyhow!("Set your Obsidian vault folder in Settings"))?;
+    write_markdown(folder, note)
+}
+
+async fn export_slack(settings: &Settings, note: &Note) -> Result<ExportResult> {
+    let cfg = integration(settings, "slack").ok_or_else(|| anyhow!("Slack not configured"))?;
+    let webhook = cfg.options.get("webhook").filter(|w| !w.trim().is_empty())
+        .ok_or_else(|| anyhow!("Add your Slack incoming webhook URL in Settings"))?;
+    let title = if note.title.is_empty() { "Untitled" } else { &note.title };
+    let text = format!("*{title}*\n\n{}", note.content);
+    let resp = reqwest::Client::new()
+        .post(webhook)
+        .json(&json!({ "text": text }))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("Slack returned {}", resp.status()));
+    }
+    Ok(ExportResult { ok: true, location: None, message: "Posted to Slack".into() })
+}
+
+async fn export_webhook(settings: &Settings, note: &Note) -> Result<ExportResult> {
+    let cfg = integration(settings, "webhook").ok_or_else(|| anyhow!("Webhook not configured"))?;
+    let url = cfg.options.get("url").filter(|u| !u.trim().is_empty())
+        .ok_or_else(|| anyhow!("Add a webhook URL in Settings"))?;
+    let resp = reqwest::Client::new()
+        .post(url)
+        .json(&json!({
+            "id": note.id,
+            "title": note.title,
+            "createdAt": note.created_at,
+            "content": note.content,
+            "durationSecs": note.duration_secs
+        }))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("Webhook returned {}", resp.status()));
+    }
+    Ok(ExportResult { ok: true, location: None, message: "Sent to webhook".into() })
+}
+
+// Writes to the OS clipboard via the plugin; excluded from coverage because it
+// touches the real system clipboard (no display in CI).
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn export_clipboard<R: Runtime>(app: &AppHandle<R>, note: &Note, format: &str) -> Result<ExportResult> {
     let text = if format == "plain" {
         format!("{}\n\n{}", note.title, note.content)
     } else {
@@ -69,12 +122,14 @@ async fn export_notion(settings: &Settings, note: &Note) -> Result<ExportResult>
         .ok_or_else(|| anyhow!("Add your Notion token in Settings"))?;
     let database_id = cfg.options.get("database").filter(|d| !d.is_empty())
         .ok_or_else(|| anyhow!("Add a Notion database ID in Settings"))?;
+    // Base URL is overridable so tests can target a mock server.
+    let base_url = cfg.options.get("base").map(|s| s.as_str()).unwrap_or("https://api.notion.com");
 
     let client = reqwest::Client::new();
     let version = "2022-06-28";
 
     let db: Value = client
-        .get(format!("https://api.notion.com/v1/databases/{database_id}"))
+        .get(format!("{base_url}/v1/databases/{database_id}"))
         .bearer_auth(token)
         .header("Notion-Version", version)
         .send()
@@ -108,7 +163,7 @@ async fn export_notion(settings: &Settings, note: &Note) -> Result<ExportResult>
     });
 
     let resp = client
-        .post("https://api.notion.com/v1/pages")
+        .post(format!("{base_url}/v1/pages"))
         .bearer_auth(token)
         .header("Notion-Version", version)
         .json(&body)
@@ -124,8 +179,8 @@ async fn export_notion(settings: &Settings, note: &Note) -> Result<ExportResult>
     Ok(ExportResult { ok: true, location: url.clone(), message: "Sent to Notion".into() })
 }
 
-pub async fn export(
-    app: &AppHandle,
+pub async fn export<R: Runtime>(
+    app: &AppHandle<R>,
     base: &std::path::Path,
     settings: &Settings,
     note: &Note,
@@ -133,12 +188,286 @@ pub async fn export(
 ) -> ExportResult {
     let result = match target {
         ExportTarget::Markdown => export_markdown(settings, base, note),
+        ExportTarget::Obsidian => export_obsidian(settings, note),
         ExportTarget::Clipboard { format } => export_clipboard(app, note, &format),
         ExportTarget::Notion => export_notion(settings, note).await,
-        ExportTarget::Calendar => Err(anyhow!("Calendar export is not available yet")),
+        ExportTarget::Slack => export_slack(settings, note).await,
+        ExportTarget::Webhook => export_webhook(settings, note).await,
     };
     match result {
         Ok(r) => r,
         Err(e) => ExportResult { ok: false, location: None, message: e.to_string() },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::Settings;
+
+    fn note() -> Note {
+        Note {
+            id: "n1".into(),
+            title: "My Meeting".into(),
+            created_at: "2026-07-16T09:30:00Z".into(),
+            updated_at: "2026-07-16T09:30:00Z".into(),
+            style_id: "meeting".into(),
+            content: "## Summary\nWe shipped it.".into(),
+            transcript: None,
+            audio_path: None,
+            duration_secs: 60.0,
+        }
+    }
+
+    fn set_folder(settings: &mut Settings, id: &str, folder: &str) {
+        let cfg = settings.integrations.iter_mut().find(|c| c.id == id).unwrap();
+        cfg.enabled = true;
+        cfg.options.insert("folder".into(), folder.into());
+    }
+
+    #[test]
+    fn sanitize_strips_unsafe_chars() {
+        assert_eq!(sanitize("Team: sync / weekly"), "Team--sync---weekly");
+        assert_eq!(sanitize("   "), "note");
+        assert_eq!(sanitize("Clean Name"), "Clean-Name");
+    }
+
+    #[test]
+    fn expand_home_handles_tilde_and_plain() {
+        assert_eq!(expand_home("/abs/path"), PathBuf::from("/abs/path"));
+        let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap();
+        assert_eq!(expand_home("~/notes"), PathBuf::from(home).join("notes"));
+    }
+
+    #[test]
+    fn markdown_document_has_title_and_body() {
+        let doc = markdown_document(&note());
+        assert!(doc.contains("# My Meeting"));
+        assert!(doc.contains("We shipped it."));
+    }
+
+    #[test]
+    fn markdown_export_writes_to_configured_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = Settings::default();
+        set_folder(&mut settings, "markdown", dir.path().to_str().unwrap());
+        let res = export_markdown(&settings, dir.path(), &note()).unwrap();
+        assert!(res.ok);
+        let contents = std::fs::read_to_string(res.location.unwrap()).unwrap();
+        assert!(contents.contains("# My Meeting"));
+    }
+
+    #[test]
+    fn markdown_export_falls_back_to_base_exports() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::default();
+        let res = export_markdown(&settings, dir.path(), &note()).unwrap();
+        assert!(res.location.unwrap().starts_with(dir.path().join("exports").to_str().unwrap()));
+    }
+
+    #[test]
+    fn obsidian_requires_folder() {
+        let settings = Settings::default();
+        assert!(export_obsidian(&settings, &note()).is_err());
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = Settings::default();
+        set_folder(&mut settings, "obsidian", dir.path().to_str().unwrap());
+        assert!(export_obsidian(&settings, &note()).unwrap().ok);
+    }
+
+    fn set_opt(settings: &mut Settings, id: &str, key: &str, val: &str) {
+        let cfg = settings.integrations.iter_mut().find(|c| c.id == id).unwrap();
+        cfg.enabled = true;
+        cfg.options.insert(key.into(), val.into());
+    }
+
+    // ---- Slack ----
+
+    #[tokio::test]
+    async fn slack_posts_and_reports_errors() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/ok")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
+        Mock::given(method("POST")).and(path("/bad")).respond_with(ResponseTemplate::new(500)).mount(&server).await;
+
+        let mut ok = Settings::default();
+        set_opt(&mut ok, "slack", "webhook", &format!("{}/ok", server.uri()));
+        assert!(export_slack(&ok, &note()).await.unwrap().ok);
+
+        let mut bad = Settings::default();
+        set_opt(&mut bad, "slack", "webhook", &format!("{}/bad", server.uri()));
+        assert!(export_slack(&bad, &note()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn slack_requires_config() {
+        assert!(export_slack(&Settings::default(), &note()).await.is_err()); // no webhook
+        let mut s = Settings::default();
+        s.integrations.clear();
+        assert!(export_slack(&s, &note()).await.is_err()); // not configured
+    }
+
+    // ---- Webhook ----
+
+    #[tokio::test]
+    async fn webhook_posts_and_reports_errors() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/hook")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
+        Mock::given(method("POST")).and(path("/err")).respond_with(ResponseTemplate::new(422)).mount(&server).await;
+
+        let mut ok = Settings::default();
+        set_opt(&mut ok, "webhook", "url", &format!("{}/hook", server.uri()));
+        assert!(export_webhook(&ok, &note()).await.unwrap().ok);
+
+        let mut bad = Settings::default();
+        set_opt(&mut bad, "webhook", "url", &format!("{}/err", server.uri()));
+        assert!(export_webhook(&bad, &note()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn webhook_requires_config() {
+        assert!(export_webhook(&Settings::default(), &note()).await.is_err());
+        let mut s = Settings::default();
+        s.integrations.clear();
+        assert!(export_webhook(&s, &note()).await.is_err());
+    }
+
+    // ---- Notion ----
+
+    fn notion_settings(base: &str) -> Settings {
+        let mut s = Settings::default();
+        set_opt(&mut s, "notion", "token", "secret_t");
+        set_opt(&mut s, "notion", "database", "db1");
+        set_opt(&mut s, "notion", "base", base);
+        s
+    }
+
+    #[tokio::test]
+    async fn notion_creates_page_with_detected_title_prop() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/databases/db1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "properties": { "Title": { "type": "title" } } })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/pages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "url": "https://notion.so/p" })))
+            .mount(&server)
+            .await;
+
+        let res = export_notion(&notion_settings(&server.uri()), &note()).await.unwrap();
+        assert!(res.ok);
+        assert_eq!(res.location.as_deref(), Some("https://notion.so/p"));
+    }
+
+    #[tokio::test]
+    async fn notion_defaults_title_prop_and_reports_api_error() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/databases/db1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "properties": {} })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/pages"))
+            .respond_with(ResponseTemplate::new(400))
+            .mount(&server)
+            .await;
+
+        assert!(export_notion(&notion_settings(&server.uri()), &note()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn notion_requires_config() {
+        let mut none = Settings::default();
+        none.integrations.clear();
+        assert!(export_notion(&none, &note()).await.is_err()); // not configured
+        assert!(export_notion(&Settings::default(), &note()).await.is_err()); // no token
+
+        let mut no_db = Settings::default();
+        set_opt(&mut no_db, "notion", "token", "t");
+        assert!(export_notion(&no_db, &note()).await.is_err()); // no database
+    }
+
+    // ---- Dispatcher ----
+
+    #[tokio::test]
+    async fn dispatcher_routes_every_target() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let app = tauri::test::mock_app();
+        let base = dir.path();
+
+        let mut settings = Settings::default();
+        set_folder(&mut settings, "markdown", dir.path().to_str().unwrap());
+        set_folder(&mut settings, "obsidian", dir.path().to_str().unwrap());
+        set_opt(&mut settings, "slack", "webhook", &format!("{}/s", server.uri()));
+        set_opt(&mut settings, "webhook", "url", &format!("{}/w", server.uri()));
+
+        for target in [ExportTarget::Markdown, ExportTarget::Obsidian, ExportTarget::Slack, ExportTarget::Webhook] {
+            let r = export(app.handle(), base, &settings, &note(), target).await;
+            assert!(r.ok, "expected ok for target");
+        }
+
+        // Error path: Notion with no config yields ok:false rather than panicking.
+        let r = export(app.handle(), base, &settings, &note(), ExportTarget::Notion).await;
+        assert!(!r.ok);
+    }
+
+    #[test]
+    fn markdown_document_defaults_untitled() {
+        let mut n = note();
+        n.title = String::new();
+        assert!(markdown_document(&n).contains("# Untitled"));
+    }
+
+    #[tokio::test]
+    async fn slack_handles_untitled_note() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/u")).respond_with(ResponseTemplate::new(200)).mount(&server).await;
+        let mut s = Settings::default();
+        set_opt(&mut s, "slack", "webhook", &format!("{}/u", server.uri()));
+        let mut n = note();
+        n.title = String::new();
+        assert!(export_slack(&s, &n).await.unwrap().ok);
+    }
+
+    #[tokio::test]
+    async fn dispatcher_handles_clipboard() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_clipboard_manager::init())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        // Exercises the clipboard match arm; the write itself may fail headless.
+        let _ = export(
+            app.handle(),
+            dir.path(),
+            &Settings::default(),
+            &note(),
+            ExportTarget::Clipboard { format: "markdown".into() },
+        )
+        .await;
     }
 }

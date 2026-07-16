@@ -19,6 +19,43 @@ fn free_port() -> Result<u16> {
     Ok(listener.local_addr()?.port())
 }
 
+/// Extract the delta text from one OpenAI-style SSE line. Returns `None` for
+/// non-data lines, the `[DONE]` sentinel, and chunks without content.
+fn parse_sse_delta(line: &str) -> Option<String> {
+    let data = line.strip_prefix("data:")?.trim();
+    if data == "[DONE]" {
+        return None;
+    }
+    let value: Value = serde_json::from_str(data).ok()?;
+    value["choices"][0]["delta"]["content"].as_str().map(|s| s.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_delta_content() {
+        let line = r#"data: {"choices":[{"delta":{"content":"Hello"}}]}"#;
+        assert_eq!(parse_sse_delta(line), Some("Hello".to_string()));
+    }
+
+    #[test]
+    fn ignores_done_and_non_data_and_empty() {
+        assert_eq!(parse_sse_delta("data: [DONE]"), None);
+        assert_eq!(parse_sse_delta(": comment"), None);
+        assert_eq!(parse_sse_delta("event: message"), None);
+        assert_eq!(parse_sse_delta("data: not json"), None);
+        assert_eq!(parse_sse_delta(r#"data: {"choices":[{"delta":{}}]}"#), None);
+    }
+
+    #[test]
+    fn free_port_returns_a_bound_port() {
+        assert!(free_port().unwrap() > 0);
+    }
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn wait_ready(port: u16) -> Result<()> {
     let client = reqwest::Client::new();
     let url = format!("http://127.0.0.1:{port}/health");
@@ -34,6 +71,7 @@ async fn wait_ready(port: u16) -> Result<()> {
 }
 
 impl LlmServer {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn start(app: &AppHandle, model_path: &Path) -> Result<LlmServer> {
         if !model_path.exists() {
             return Err(anyhow!("Language model is not installed"));
@@ -74,6 +112,7 @@ impl LlmServer {
         Ok(LlmServer { child: Some(child), port })
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn stop(&mut self) {
         if let Some(child) = self.child.take() {
             let _ = child.kill();
@@ -82,6 +121,7 @@ impl LlmServer {
 
     /// Stream a completion, emitting `notes-token` events as text arrives, and
     /// return the full generated text.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn generate(&self, app: &AppHandle, note_id: &str, prompt: &str) -> Result<String> {
         let client = reqwest::Client::new();
         let url = format!("http://127.0.0.1:{}/v1/chat/completions", self.port);
@@ -108,20 +148,13 @@ impl LlmServer {
             while let Some(pos) = buffer.find('\n') {
                 let line = buffer[..pos].trim().to_string();
                 buffer.drain(..=pos);
-                let Some(data) = line.strip_prefix("data:") else { continue };
-                let data = data.trim();
-                if data == "[DONE]" {
-                    continue;
-                }
-                if let Ok(value) = serde_json::from_str::<Value>(data) {
-                    if let Some(token) = value["choices"][0]["delta"]["content"].as_str() {
-                        if !token.is_empty() {
-                            output.push_str(token);
-                            let _ = app.emit(
-                                "notes-token",
-                                NotesToken { note_id: note_id.to_string(), text: token.to_string() },
-                            );
-                        }
+                if let Some(token) = parse_sse_delta(&line) {
+                    if !token.is_empty() {
+                        output.push_str(&token);
+                        let _ = app.emit(
+                            "notes-token",
+                            NotesToken { note_id: note_id.to_string(), text: token },
+                        );
                     }
                 }
             }
@@ -133,6 +166,7 @@ impl LlmServer {
 }
 
 impl Drop for LlmServer {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn drop(&mut self) {
         self.stop();
     }

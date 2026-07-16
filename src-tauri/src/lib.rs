@@ -1,4 +1,7 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 mod audio;
+mod calendar;
 mod commands;
 mod integrations;
 mod llm;
@@ -11,6 +14,8 @@ mod types;
 use state::AppState;
 use tauri::Manager;
 
+// Starts the desktop event loop; cannot run headless in CI.
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -50,6 +55,8 @@ pub fn run() {
             commands::save_note,
             commands::delete_note,
             commands::export_note,
+            commands::get_calendar_events,
+            commands::suggested_note_title,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -41,7 +41,23 @@ export interface AudioDevice {
   isDefault: boolean;
 }
 
-export type IntegrationId = "markdown" | "clipboard" | "notion" | "calendar";
+export type IntegrationId =
+  | "markdown"
+  | "obsidian"
+  | "clipboard"
+  | "notion"
+  | "slack"
+  | "webhook"
+  | "google-calendar"
+  | "apple-calendar"
+  | "microsoft-calendar";
+
+export interface CalendarEvent {
+  title: string;
+  start: string;
+  end: string;
+  provider: string;
+}
 
 export interface IntegrationConfig {
   id: IntegrationId;
@@ -128,9 +144,11 @@ export interface AppStatus {
 
 export type ExportTarget =
   | { kind: "markdown" }
+  | { kind: "obsidian" }
   | { kind: "clipboard"; format: "markdown" | "plain" }
   | { kind: "notion" }
-  | { kind: "calendar" };
+  | { kind: "slack" }
+  | { kind: "webhook" };
 
 export interface ExportResult {
   ok: boolean;

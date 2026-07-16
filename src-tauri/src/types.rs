@@ -76,9 +76,14 @@ impl Default for Settings {
             capture_microphone: true,
             integrations: vec![
                 IntegrationConfig { id: "markdown".into(), enabled: false, options: HashMap::new() },
+                IntegrationConfig { id: "obsidian".into(), enabled: false, options: HashMap::new() },
                 IntegrationConfig { id: "clipboard".into(), enabled: true, options: HashMap::new() },
                 IntegrationConfig { id: "notion".into(), enabled: false, options: HashMap::new() },
-                IntegrationConfig { id: "calendar".into(), enabled: false, options: HashMap::new() },
+                IntegrationConfig { id: "slack".into(), enabled: false, options: HashMap::new() },
+                IntegrationConfig { id: "webhook".into(), enabled: false, options: HashMap::new() },
+                IntegrationConfig { id: "google-calendar".into(), enabled: false, options: HashMap::new() },
+                IntegrationConfig { id: "apple-calendar".into(), enabled: false, options: HashMap::new() },
+                IntegrationConfig { id: "microsoft-calendar".into(), enabled: false, options: HashMap::new() },
             ],
         }
     }
@@ -159,9 +164,22 @@ pub struct NotesToken {
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum ExportTarget {
     Markdown,
+    Obsidian,
     Clipboard { format: String },
     Notion,
-    Calendar,
+    Slack,
+    Webhook,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarEvent {
+    pub title: String,
+    /// RFC3339 UTC timestamps.
+    pub start: String,
+    pub end: String,
+    /// Provider label, e.g. "Google", "Apple", "Microsoft".
+    pub provider: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -170,4 +188,44 @@ pub struct ExportResult {
     pub ok: bool,
     pub location: Option<String>,
     pub message: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_settings() {
+        let s = Settings::default();
+        assert!(!s.setup_complete);
+        assert!(s.capture_system_audio);
+        assert!(s.capture_microphone);
+        assert_eq!(s.default_style_id, "meeting");
+        for id in ["markdown", "slack", "notion", "google-calendar", "apple-calendar", "microsoft-calendar"] {
+            assert!(s.integrations.iter().any(|c| c.id == id), "missing {id}");
+        }
+    }
+
+    #[test]
+    fn settings_serde_roundtrip_is_camel_case() {
+        let json = serde_json::to_string(&Settings::default()).unwrap();
+        assert!(json.contains("setupComplete"));
+        assert!(json.contains("captureSystemAudio"));
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.default_style_id, "meeting");
+    }
+
+    #[test]
+    fn export_target_deserializes_by_kind() {
+        let clip: ExportTarget = serde_json::from_str(r#"{"kind":"clipboard","format":"plain"}"#).unwrap();
+        assert!(matches!(clip, ExportTarget::Clipboard { format } if format == "plain"));
+        assert!(matches!(serde_json::from_str::<ExportTarget>(r#"{"kind":"markdown"}"#).unwrap(), ExportTarget::Markdown));
+        assert!(matches!(serde_json::from_str::<ExportTarget>(r#"{"kind":"slack"}"#).unwrap(), ExportTarget::Slack));
+    }
+
+    #[test]
+    fn model_kind_serializes_lowercase() {
+        assert_eq!(serde_json::to_string(&ModelKind::Whisper).unwrap(), "\"whisper\"");
+        assert_eq!(serde_json::to_string(&ModelKind::Llm).unwrap(), "\"llm\"");
+    }
 }

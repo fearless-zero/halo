@@ -1,9 +1,10 @@
 name: Tests
 on:
   push:
-    branches: [master]
+    branches: [master, beta-v0.1]
   pull_request:
-    branches: [master]
+    branches: [master, beta-v0.1]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -40,8 +41,8 @@ jobs:
       - name: Typecheck frontend
         run: npm run typecheck
 
-      - name: Unit tests
-        run: npm run test
+      - name: Frontend tests + coverage
+        run: npm run coverage
 
       - name: Build frontend
         run: npx vite build
@@ -55,5 +56,46 @@ jobs:
           printf '' > "src-tauri/binaries/llama-server-$TRIPLE$EXT"
           printf '' > "src-tauri/binaries/whisper-cli-$TRIPLE$EXT"
 
-      - name: Compile-check backend
-        run: cargo check --manifest-path src-tauri/Cargo.toml
+      - name: Backend tests
+        if: runner.os != 'Windows'
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
+      # The Tauri-linked test binary fails to launch on Windows CI
+      # (WebView2 runtime DLL entrypoint mismatch, STATUS_ENTRYPOINT_NOT_FOUND),
+      # so we compile the tests there; they run on Linux, macOS and coverage.
+      - name: Backend tests (compile only on Windows)
+        if: runner.os == 'Windows'
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib --no-run
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev libasound2-dev
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Full coverage (frontend + backend, 100% enforced)
+        run: bash scripts/coverage.sh
