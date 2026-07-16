@@ -14,14 +14,10 @@ export default defineConfig({
       // React components (screens/, components/, App.tsx) and the bootstrap
       // entry are the UI/integration layer, exercised by behavioural tests
       // rather than gated on line coverage; types.ts has no runtime code.
-      include: ["src/markdown.ts", "src/labels.ts", "src/ipc.ts", "src/store.tsx"],
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: ["src/**/*.test.{ts,tsx}", "src/main.tsx", "src/types.ts"],
       reporter: ["text", "json-summary"],
-      // 100% is enforced on the pure logic modules.
-      thresholds: {
-        "src/markdown.ts": { statements: 100, branches: 100, functions: 100, lines: 100 },
-        "src/labels.ts": { statements: 100, branches: 100, functions: 100, lines: 100 },
-        "src/ipc.ts": { statements: 100, branches: 100, functions: 100, lines: 100 },
-      },
+      thresholds: { statements: 100, branches: 100, functions: 100, lines: 100 },
     },
   },
 });

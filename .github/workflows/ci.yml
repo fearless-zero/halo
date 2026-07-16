@@ -57,3 +57,36 @@ jobs:
 
       - name: Backend tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev libasound2-dev
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Full coverage (frontend + backend, 100% enforced)
+        run: bash scripts/coverage.sh

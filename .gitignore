@@ -35,3 +35,7 @@ Thumbs.db
 
 # Build outputs
 *.log
+
+# Coverage
+coverage/
+lcov.info

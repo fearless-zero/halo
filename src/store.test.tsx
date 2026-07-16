@@ -65,6 +65,8 @@ function Capture() {
 }
 
 let audioCb: (p: unknown) => void = () => {};
+let transCb: (p: unknown) => void = () => {};
+let tokenCb: (p: unknown) => void = () => {};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -93,8 +95,14 @@ beforeEach(() => {
     audioCb = cb;
     return Promise.resolve(() => {});
   });
-  m(events.onTranscribeProgress).mockResolvedValue(() => {});
-  m(events.onNotesToken).mockResolvedValue(() => {});
+  m(events.onTranscribeProgress).mockImplementation((cb: (p: unknown) => void) => {
+    transCb = cb;
+    return Promise.resolve(() => {});
+  });
+  m(events.onNotesToken).mockImplementation((cb: (p: unknown) => void) => {
+    tokenCb = cb;
+    return Promise.resolve(() => {});
+  });
 });
 
 afterEach(cleanup);
@@ -270,5 +278,140 @@ describe("live events", () => {
     await mount();
     act(() => audioCb({ rms: 0.4, peak: 0.9 }));
     expect(ctx.level).toEqual({ rms: 0.4, peak: 0.9 });
+  });
+
+  it("routes transcribe/token events only for the active note", async () => {
+    await mount();
+    await act(async () => {
+      await ctx.startNewRecording();
+    });
+    // activeNoteId is now the created note ("n1").
+    act(() => transCb({ noteId: "n1", percent: 33 }));
+    expect(ctx.recording).toMatchObject({ status: "transcribing", percent: 33 });
+    act(() => tokenCb({ noteId: "n1", text: "abc" }));
+    expect(ctx.streamBuffer).toBe("abc");
+    // Events for another note are ignored.
+    act(() => tokenCb({ noteId: "other", text: "zzz" }));
+    act(() => transCb({ noteId: "other", percent: 99 }));
+    expect(ctx.streamBuffer).toBe("abc");
+  });
+});
+
+describe("guards and error paths", () => {
+  it("no-ops actions with no current note", async () => {
+    await mount();
+    ctx.closeNote();
+    act(() => {
+      ctx.updateNoteContent("x");
+      ctx.updateNoteTitle("y");
+    });
+    await act(async () => {
+      await ctx.persistCurrentNote();
+      await ctx.regenerate("meeting");
+    });
+    expect(api.saveNote).not.toHaveBeenCalled();
+    expect(api.generateNotes).not.toHaveBeenCalled();
+  });
+
+  it("no-ops stopRecording when idle", async () => {
+    await mount();
+    await act(async () => {
+      await ctx.stopRecording();
+    });
+    expect(api.stopRecording).not.toHaveBeenCalled();
+  });
+
+  it("captures errors from openNote and cancelRecording", async () => {
+    await mount();
+    m(api.getNote).mockRejectedValueOnce(new Error("no note"));
+    await act(async () => {
+      await ctx.openNote("bad");
+    });
+    expect(ctx.error).toBe("no note");
+
+    m(api.cancelRecording).mockRejectedValueOnce(new Error("cancel failed"));
+    await act(async () => {
+      await ctx.cancelRecording();
+    });
+    expect(ctx.error).toBe("cancel failed");
+    expect(ctx.recording.status).toBe("idle");
+  });
+
+  it("captures errors from processing, recording, and persistence", async () => {
+    await mount();
+
+    await act(async () => {
+      await ctx.openNote("r");
+    });
+    m(api.transcribe).mockRejectedValueOnce(new Error("t-fail"));
+    await act(async () => {
+      await ctx.regenerate("meeting");
+    });
+    expect(ctx.error).toBe("t-fail");
+    expect(ctx.recording.status).toBe("idle");
+
+    m(api.createNote).mockRejectedValueOnce(new Error("c-fail"));
+    await act(async () => {
+      await ctx.startNewRecording();
+    });
+    expect(ctx.error).toBe("c-fail");
+
+    await act(async () => {
+      await ctx.openNote("p");
+    });
+    m(api.saveNote).mockRejectedValueOnce(new Error("s-fail"));
+    await act(async () => {
+      await ctx.persistCurrentNote();
+    });
+    expect(ctx.error).toBe("s-fail");
+  });
+
+  it("throws when useHalo is used outside the provider", () => {
+    const Bad = () => {
+      useHalo();
+      return null;
+    };
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(() => render(<Bad />)).toThrow("must be used within");
+    spy.mockRestore();
+  });
+
+  it("leaves a different open note untouched when deleting another", async () => {
+    await mount();
+    await act(async () => {
+      await ctx.openNote("keep");
+    });
+    await act(async () => {
+      await ctx.deleteNote("other");
+    });
+    expect(ctx.currentNote?.id).toBe("keep");
+  });
+
+  it("captures a stopRecording failure", async () => {
+    await mount();
+    await act(async () => {
+      await ctx.startNewRecording();
+    });
+    m(api.stopRecording).mockRejectedValueOnce(new Error("stop-fail"));
+    await act(async () => {
+      await ctx.stopRecording();
+    });
+    expect(ctx.error).toBe("stop-fail");
+  });
+
+  it("guards settings-dependent actions when settings failed to load", async () => {
+    m(api.getSettings).mockRejectedValue(new Error("no settings"));
+    render(
+      <HaloProvider>
+        <Capture />
+      </HaloProvider>,
+    );
+    await waitFor(() => expect(ctx.error).toBe("no settings"));
+    await act(async () => {
+      await ctx.completeSetup();
+      await ctx.startNewRecording();
+    });
+    expect(api.updateSettings).not.toHaveBeenCalled();
+    expect(api.createNote).not.toHaveBeenCalled();
   });
 });

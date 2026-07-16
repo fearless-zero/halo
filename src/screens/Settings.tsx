@@ -82,6 +82,7 @@ function StyleEditor() {
     });
 
   const save = async () => {
+    /* v8 ignore next -- Save only renders when a draft exists */
     if (!draft) return;
     await api.saveNoteStyle(draft);
     setDraft(null);
