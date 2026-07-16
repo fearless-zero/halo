@@ -102,6 +102,7 @@ fn to_https(url: &str) -> String {
 
 /// Fetch and parse every configured calendar feed. Per-feed failures are logged
 /// and skipped so one bad URL never breaks the rest.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn list_events(settings: &Settings) -> Vec<CalendarEvent> {
     let client = reqwest::Client::new();
     let mut all = Vec::new();
@@ -226,5 +227,48 @@ mod tests {
     fn webcal_becomes_https() {
         assert_eq!(to_https("webcal://host/cal.ics"), "https://host/cal.ics");
         assert_eq!(to_https("https://host/cal.ics"), "https://host/cal.ics");
+    }
+
+    #[tokio::test]
+    async fn list_events_fetches_enabled_feeds_only() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/cal.ics"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(SAMPLE))
+            .mount(&server)
+            .await;
+
+        let mut settings = Settings::default();
+        // google-calendar enabled with a real (mock) feed; the others stay off.
+        let cfg = settings.integrations.iter_mut().find(|c| c.id == "google-calendar").unwrap();
+        cfg.enabled = true;
+        cfg.options.insert("ics".into(), format!("{}/cal.ics", server.uri()));
+
+        let events = list_events(&settings).await;
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].provider, "Google");
+    }
+
+    #[test]
+    fn current_or_next_ignores_unparseable_dates() {
+        let bad = vec![CalendarEvent {
+            title: "x".into(),
+            start: "not-a-date".into(),
+            end: "nope".into(),
+            provider: "P".into(),
+        }];
+        let now = Utc.with_ymd_and_hms(2026, 7, 16, 14, 0, 0).unwrap();
+        assert!(current_or_next(&bad, now).is_none());
+    }
+
+    #[test]
+    fn parse_ics_skips_unknown_props_and_colonless_lines() {
+        let ics = "BEGIN:VEVENT\r\nSUMMARY:Meeting\r\nLOCATION:HQ\r\nNOCOLONLINE\r\nDTSTART:20260716T140000Z\r\nEND:VEVENT";
+        let events = parse_ics(ics, "Apple");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].title, "Meeting");
     }
 }

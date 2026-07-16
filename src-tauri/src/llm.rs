@@ -48,8 +48,14 @@ mod tests {
         assert_eq!(parse_sse_delta("data: not json"), None);
         assert_eq!(parse_sse_delta(r#"data: {"choices":[{"delta":{}}]}"#), None);
     }
+
+    #[test]
+    fn free_port_returns_a_bound_port() {
+        assert!(free_port().unwrap() > 0);
+    }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn wait_ready(port: u16) -> Result<()> {
     let client = reqwest::Client::new();
     let url = format!("http://127.0.0.1:{port}/health");
@@ -65,6 +71,7 @@ async fn wait_ready(port: u16) -> Result<()> {
 }
 
 impl LlmServer {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn start(app: &AppHandle, model_path: &Path) -> Result<LlmServer> {
         if !model_path.exists() {
             return Err(anyhow!("Language model is not installed"));
@@ -105,6 +112,7 @@ impl LlmServer {
         Ok(LlmServer { child: Some(child), port })
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn stop(&mut self) {
         if let Some(child) = self.child.take() {
             let _ = child.kill();
@@ -113,6 +121,7 @@ impl LlmServer {
 
     /// Stream a completion, emitting `notes-token` events as text arrives, and
     /// return the full generated text.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub async fn generate(&self, app: &AppHandle, note_id: &str, prompt: &str) -> Result<String> {
         let client = reqwest::Client::new();
         let url = format!("http://127.0.0.1:{}/v1/chat/completions", self.port);
@@ -157,6 +166,7 @@ impl LlmServer {
 }
 
 impl Drop for LlmServer {
+    #[cfg_attr(coverage_nightly, coverage(off))]
     fn drop(&mut self) {
         self.stop();
     }

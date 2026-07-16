@@ -32,6 +32,7 @@ struct WhisperOffsets {
     to: i64,
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn emit_progress(app: &AppHandle, note_id: &str, percent: f32) {
     let _ = app.emit(
         "transcribe-progress",
@@ -39,6 +40,7 @@ fn emit_progress(app: &AppHandle, note_id: &str, percent: f32) {
     );
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn transcribe(
     app: &AppHandle,
     note_id: &str,

@@ -252,8 +252,12 @@ mod tests {
         };
         let saved = save_style(d.path(), &custom).unwrap();
         assert!(!saved.builtin);
+        // Saving the same id again updates the existing custom entry in place.
+        let mut renamed = custom.clone();
+        renamed.name = "Renamed".into();
+        save_style(d.path(), &renamed).unwrap();
+        assert_eq!(get_style(d.path(), "mine").unwrap().name, "Renamed");
         assert!(load_styles(d.path()).iter().any(|s| s.id == "mine"));
-        assert_eq!(get_style(d.path(), "mine").unwrap().name, "Mine");
 
         // Editing a builtin keeps it flagged builtin.
         let mut edited = get_style(d.path(), "meeting").unwrap();
@@ -283,5 +287,34 @@ mod tests {
         delete_note(d.path(), "a").unwrap();
         assert!(load_note(d.path(), "a").is_err());
         assert_eq!(list_notes(d.path()).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn list_notes_on_missing_dir_is_empty() {
+        let d = tempfile::tempdir().unwrap(); // no ensure_dirs: notes/ does not exist
+        assert!(list_notes(d.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn list_notes_ignores_non_json_and_corrupt_files() {
+        let d = base();
+        save_note(d.path(), &sample_note("good", "body")).unwrap();
+        std::fs::write(d.path().join("notes").join("readme.txt"), "not a note").unwrap();
+        std::fs::write(d.path().join("notes").join("broken.json"), "{ not valid json").unwrap();
+        // A directory with a .json name passes the extension check but fails to read.
+        std::fs::create_dir(d.path().join("notes").join("adir.json")).unwrap();
+        let list = list_notes(d.path()).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, "good");
+    }
+
+    #[test]
+    fn malformed_files_fall_back_to_defaults() {
+        let d = base();
+        std::fs::write(d.path().join("settings.json"), "{ broken").unwrap();
+        assert!(!load_settings(d.path()).setup_complete);
+
+        std::fs::write(custom_styles_path(d.path()), "{ broken").unwrap();
+        assert!(load_styles(d.path()).iter().any(|s| s.id == "meeting"));
     }
 }

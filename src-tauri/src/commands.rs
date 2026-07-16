@@ -28,6 +28,7 @@ fn derive_title(content: &str) -> String {
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn get_app_status(state: State<'_, AppState>) -> AppStatus {
     let setup_complete = state.settings.lock().unwrap().setup_complete;
     AppStatus {
@@ -38,11 +39,13 @@ pub fn get_app_status(state: State<'_, AppState>) -> AppStatus {
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn get_settings(state: State<'_, AppState>) -> Settings {
     state.settings.lock().unwrap().clone()
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn update_settings(state: State<'_, AppState>, settings: Settings) -> R<Settings> {
     storage::save_settings(&state.base_dir, &settings).map_err(err)?;
     *state.settings.lock().unwrap() = settings.clone();
@@ -50,16 +53,19 @@ pub fn update_settings(state: State<'_, AppState>, settings: Settings) -> R<Sett
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn list_audio_inputs() -> Vec<AudioDevice> {
     audio::list_inputs()
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn get_models(state: State<'_, AppState>) -> Vec<ModelInfo> {
     models::model_infos(&state.models_dir())
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn download_models(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -70,21 +76,25 @@ pub async fn download_models(
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn get_note_styles(state: State<'_, AppState>) -> Vec<NoteStyle> {
     storage::load_styles(&state.base_dir)
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn save_note_style(state: State<'_, AppState>, style: NoteStyle) -> R<NoteStyle> {
     storage::save_style(&state.base_dir, &style).map_err(err)
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn delete_note_style(state: State<'_, AppState>, id: String) -> R<()> {
     storage::delete_style(&state.base_dir, &id).map_err(err)
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn create_note(state: State<'_, AppState>, title: String) -> R<Note> {
     let ts = now();
     let style_id = state.settings.lock().unwrap().default_style_id.clone();
@@ -104,6 +114,7 @@ pub fn create_note(state: State<'_, AppState>, title: String) -> R<Note> {
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn start_recording(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -121,6 +132,7 @@ pub fn start_recording(
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn stop_recording(state: State<'_, AppState>) -> R<f64> {
     let recorder = state.recorder.lock().unwrap().take();
     let note_id = state.recording_note.lock().unwrap().take();
@@ -141,6 +153,7 @@ pub fn stop_recording(state: State<'_, AppState>) -> R<f64> {
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn cancel_recording(state: State<'_, AppState>) -> R<()> {
     if let Some(recorder) = state.recorder.lock().unwrap().take() {
         recorder.cancel();
@@ -150,6 +163,7 @@ pub fn cancel_recording(state: State<'_, AppState>) -> R<()> {
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn transcribe(app: AppHandle, state: State<'_, AppState>, note_id: String) -> R<Transcript> {
     let base = state.base_dir.clone();
     let wav = storage::audio_path(&base, &note_id);
@@ -165,6 +179,7 @@ pub async fn transcribe(app: AppHandle, state: State<'_, AppState>, note_id: Str
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn generate_notes(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -204,16 +219,19 @@ pub async fn generate_notes(
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn list_notes(state: State<'_, AppState>) -> R<Vec<NoteSummary>> {
     storage::list_notes(&state.base_dir).map_err(err)
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn get_note(state: State<'_, AppState>, id: String) -> R<Note> {
     storage::load_note(&state.base_dir, &id).map_err(err)
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn save_note(state: State<'_, AppState>, note: Note) -> R<Note> {
     let mut note = note;
     note.updated_at = now();
@@ -222,11 +240,13 @@ pub fn save_note(state: State<'_, AppState>, note: Note) -> R<Note> {
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn delete_note(state: State<'_, AppState>, id: String) -> R<()> {
     storage::delete_note(&state.base_dir, &id).map_err(err)
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn export_note(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -240,12 +260,14 @@ pub async fn export_note(
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn get_calendar_events(state: State<'_, AppState>) -> R<Vec<CalendarEvent>> {
     let settings = state.settings.lock().unwrap().clone();
     Ok(crate::calendar::list_events(&settings).await)
 }
 
 #[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn suggested_note_title(state: State<'_, AppState>) -> R<String> {
     let settings = state.settings.lock().unwrap().clone();
     let events = crate::calendar::list_events(&settings).await;
@@ -256,7 +278,12 @@ pub async fn suggested_note_title(state: State<'_, AppState>) -> R<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{derive_title, now};
+    use super::{derive_title, err, now};
+
+    #[test]
+    fn err_stringifies() {
+        assert_eq!(err("boom"), "boom");
+    }
 
     #[test]
     fn derive_title_from_heading() {

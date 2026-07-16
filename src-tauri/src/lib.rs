@@ -1,3 +1,5 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 mod audio;
 mod calendar;
 mod commands;
@@ -12,6 +14,8 @@ mod types;
 use state::AppState;
 use tauri::Manager;
 
+// Starts the desktop event loop; cannot run headless in CI.
+#[cfg_attr(coverage_nightly, coverage(off))]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()

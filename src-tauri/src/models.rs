@@ -2,7 +2,7 @@ use crate::types::{ModelDownloadProgress, ModelInfo, ModelKind};
 use anyhow::{anyhow, Result};
 use futures_util::StreamExt;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime};
 use tokio::io::AsyncWriteExt;
 
 pub struct ModelSpec {
@@ -85,15 +85,30 @@ pub fn all_installed(models_dir: &Path) -> bool {
     specs().iter().all(|s| is_installed(s, models_dir))
 }
 
-async fn download_one(app: &AppHandle, spec: &ModelSpec, models_dir: &Path) -> Result<()> {
+#[cfg_attr(coverage_nightly, coverage(off))]
+async fn download_one<R: Runtime>(app: &AppHandle<R>, spec: &ModelSpec, models_dir: &Path) -> Result<()> {
     let final_path = models_dir.join(spec.file_name);
-    let part_path = models_dir.join(format!("{}.part", spec.file_name));
+    fetch_to_file(app, spec.id, spec.url, spec.approx_size, &final_path).await
+}
 
-    let resp = reqwest::get(spec.url).await?;
+/// Stream `url` to `final_path`, writing to a `.part` file first and emitting
+/// progress events. Runtime-generic so tests can drive it with a mock runtime.
+async fn fetch_to_file<R: Runtime>(
+    app: &AppHandle<R>,
+    model_id: &str,
+    url: &str,
+    approx_size: u64,
+    final_path: &Path,
+) -> Result<()> {
+    let mut part_os = final_path.as_os_str().to_owned();
+    part_os.push(".part");
+    let part_path = PathBuf::from(part_os);
+
+    let resp = reqwest::get(url).await?;
     if !resp.status().is_success() {
         return Err(anyhow!("download failed: HTTP {}", resp.status()));
     }
-    let total = resp.content_length().unwrap_or(spec.approx_size);
+    let total = resp.content_length().unwrap_or(approx_size);
     let mut file = tokio::fs::File::create(&part_path).await?;
     let mut downloaded: u64 = 0;
     let mut last_pct: i64 = -1;
@@ -109,7 +124,7 @@ async fn download_one(app: &AppHandle, spec: &ModelSpec, models_dir: &Path) -> R
             let _ = app.emit(
                 "model-download-progress",
                 ModelDownloadProgress {
-                    model_id: spec.id.to_string(),
+                    model_id: model_id.to_string(),
                     downloaded_bytes: downloaded,
                     total_bytes: total,
                     done: false,
@@ -120,12 +135,12 @@ async fn download_one(app: &AppHandle, spec: &ModelSpec, models_dir: &Path) -> R
     }
     file.flush().await?;
     drop(file);
-    tokio::fs::rename(&part_path, &final_path).await?;
+    tokio::fs::rename(&part_path, final_path).await?;
 
     let _ = app.emit(
         "model-download-progress",
         ModelDownloadProgress {
-            model_id: spec.id.to_string(),
+            model_id: model_id.to_string(),
             downloaded_bytes: downloaded,
             total_bytes: total,
             done: true,
@@ -135,7 +150,10 @@ async fn download_one(app: &AppHandle, spec: &ModelSpec, models_dir: &Path) -> R
     Ok(())
 }
 
-pub async fn download(app: &AppHandle, models_dir: &Path, ids: Vec<String>) -> Result<()> {
+// Orchestration over the network; the core streaming logic is `fetch_to_file`,
+// which is fully covered by tests against a mock server.
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub async fn download<R: Runtime>(app: &AppHandle<R>, models_dir: &Path, ids: Vec<String>) -> Result<()> {
     std::fs::create_dir_all(models_dir)?;
     for id in ids {
         let Some(spec) = spec_by_id(&id) else { continue };
@@ -208,5 +226,53 @@ mod tests {
         let spec = spec_by_id("whisper-base").unwrap();
         std::fs::write(dir.path().join(spec.file_name), b"partial").unwrap();
         assert!(!is_installed(&spec, dir.path()));
+    }
+
+    #[tokio::test]
+    async fn fetch_downloads_streams_and_renames() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/m"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![7u8; 5000]))
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("m.bin");
+        let app = tauri::test::mock_app();
+        fetch_to_file(app.handle(), "whisper-base", &format!("{}/m", server.uri()), 5000, &dest)
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read(&dest).unwrap().len(), 5000);
+        assert!(!dir.path().join("m.bin.part").exists());
+    }
+
+    #[tokio::test]
+    async fn fetch_errors_on_http_failure() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/missing"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let app = tauri::test::mock_app();
+        let res = fetch_to_file(
+            app.handle(),
+            "x",
+            &format!("{}/missing", server.uri()),
+            10,
+            &dir.path().join("x"),
+        )
+        .await;
+        assert!(res.is_err());
     }
 }
