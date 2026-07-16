@@ -1,9 +1,10 @@
 name: Tests
 on:
   push:
-    branches: [master]
+    branches: [main, master, beta-v0.1]
   pull_request:
-    branches: [master]
+    branches: [main, master, beta-v0.1]
+  workflow_dispatch:
 
 jobs:
   build:
