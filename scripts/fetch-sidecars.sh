@@ -29,6 +29,12 @@ fi
 HOST_TRIPLE="$(rustc -Vv | awk '/host:/ {print $2}')"
 TRIPLES="${SIDECAR_TRIPLES:-$HOST_TRIPLE}"
 
+# Bound build parallelism to the core count. A bare `-j` (unlimited) spawns
+# dozens of concurrent compiles of llama.cpp's large translation units, which
+# exhausts RAM and thrashes swap on small CI runners — turning a ~15-minute
+# build into an hour. Cap it at the number of online CPUs.
+JOBS="${CMAKE_BUILD_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
+
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -56,7 +62,7 @@ build_engine() {
     echo "==> Building $target for $triple $extra"
     # shellcheck disable=SC2086
     cmake -S "$WORK/$name" -B "$bdir" -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF $extra >/dev/null
-    cmake --build "$bdir" --config Release --target "$target" -j
+    cmake --build "$bdir" --config Release --target "$target" --parallel "$JOBS"
     local built
     built="$(find "$bdir" -name "$target$ext" -type f | head -1)"
     if [ -z "$built" ]; then

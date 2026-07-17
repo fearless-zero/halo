@@ -36,7 +36,18 @@ jobs:
       - name: Install CMake
         run: brew install cmake
 
+      # Cache the compiled engines so only the first release pays the build
+      # cost; later releases restore them in seconds. Bump the -vN suffix to
+      # force a rebuild (e.g. to pick up a newer llama.cpp/whisper.cpp).
+      - name: Cache universal sidecars
+        id: sidecars
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/binaries
+          key: sidecars-macos-universal-${{ hashFiles('scripts/fetch-sidecars.sh') }}-v1
+
       - name: Build universal sidecars (llama.cpp + whisper.cpp)
+        if: steps.sidecars.outputs.cache-hit != 'true'
         env:
           SIDECAR_TRIPLES: "aarch64-apple-darwin x86_64-apple-darwin"
         run: bash scripts/fetch-sidecars.sh
