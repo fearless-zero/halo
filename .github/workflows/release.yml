@@ -1,0 +1,75 @@
+name: Release
+
+# Push a version tag to build and publish a downloadable macOS app:
+#   git tag v0.1.0 && git push origin v0.1.0
+# A universal (Intel + Apple Silicon) .dmg is attached to a GitHub Release.
+# You can also run this manually (workflow_dispatch) as a dry run — it builds
+# the .dmg and uploads it as a workflow artifact without publishing a Release.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install CMake
+        run: brew install cmake
+
+      - name: Build universal sidecars (llama.cpp + whisper.cpp)
+        env:
+          SIDECAR_TRIPLES: "aarch64-apple-darwin x86_64-apple-darwin"
+        run: bash scripts/fetch-sidecars.sh
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Build frontend (Vite)
+        run: npx vite build
+
+      - name: Build universal macOS app
+        run: npx tauri build --target universal-apple-darwin --bundles dmg
+
+      - name: Upload .dmg as artifact (manual dry run)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Halo-macos-universal
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+      - name: Publish GitHub Release with .dmg (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          draft: false
+          generate_release_notes: true
+          body: |
+            Halo — local-first AI notetaking app.
+
+            **macOS (universal — Intel + Apple Silicon):** download the `.dmg` below, open it and drag Halo to Applications.
+
+            This build is unsigned, so on first launch macOS Gatekeeper will block it. Right-click the app → **Open** once (or run `xattr -dr com.apple.quarantine /Applications/Halo.app`), then it opens normally.
+
+            On first run Halo downloads its AI models (one-time). After that, transcription and note-writing work fully offline.
