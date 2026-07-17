@@ -57,6 +57,9 @@ export const api = {
   exportNote: (id: string, target: ExportTarget) =>
     invoke<ExportResult>("export_note", { id, target }),
 
+  importAudio: (paths: string[]) => invoke<Note[]>("import_audio", { paths }),
+  researchNote: (noteId: string) => invoke<Note>("research_note", { noteId }),
+
   getCalendarEvents: () => invoke<CalendarEvent[]>("get_calendar_events"),
   suggestedNoteTitle: () => invoke<string>("suggested_note_title"),
 };

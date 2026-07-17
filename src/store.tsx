@@ -7,10 +7,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, events } from "./ipc";
 import type {
   AppStatus,
   AudioLevel,
+  ImportProgress,
   ModelInfo,
   Note,
   NoteStyle,
@@ -33,6 +35,8 @@ interface HaloState {
   level: AudioLevel;
   /** Tokens accumulated while the model streams notes for the active note. */
   streamBuffer: string;
+  /** Non-null while a batch of imported recordings is being processed. */
+  importing: ImportProgress | null;
   error: string | null;
 }
 
@@ -43,9 +47,11 @@ interface HaloActions {
   openNote: (id: string) => Promise<void>;
   closeNote: () => void;
   startNewRecording: () => Promise<void>;
+  importRecordings: () => Promise<void>;
   stopRecording: () => Promise<void>;
   cancelRecording: () => Promise<void>;
   regenerate: (styleId: string) => Promise<void>;
+  researchCurrentNote: () => Promise<void>;
   updateNoteContent: (content: string) => void;
   updateNoteTitle: (title: string) => void;
   persistCurrentNote: () => Promise<void>;
@@ -74,6 +80,7 @@ export function HaloProvider({ children }: { children: ReactNode }) {
   const [recording, setRecording] = useState<RecordingState>({ status: "idle" });
   const [level, setLevel] = useState<AudioLevel>({ rms: 0, peak: 0 });
   const [streamBuffer, setStreamBuffer] = useState("");
+  const [importing, setImporting] = useState<ImportProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Track the note currently being recorded/processed so event handlers that
@@ -158,9 +165,14 @@ export function HaloProvider({ children }: { children: ReactNode }) {
       await api.transcribe(noteId);
       setRecording({ status: "generating", noteId });
       setStreamBuffer("");
-      const note = await api.generateNotes(noteId, styleId);
+      let note = await api.generateNotes(noteId, styleId);
       setCurrentNote(note);
       setStreamBuffer("");
+      if (settings?.webResearch) {
+        setRecording({ status: "researching", noteId });
+        note = await api.researchNote(noteId).catch(() => note);
+        setCurrentNote(note);
+      }
       await refreshNotes();
     } catch (e) {
       fail(e);
@@ -182,6 +194,48 @@ export function HaloProvider({ children }: { children: ReactNode }) {
       await refreshNotes();
     } catch (e) {
       fail(e);
+    }
+  };
+
+  const importRecordings = async () => {
+    if (!settings) return;
+    try {
+      const selected = await openDialog({
+        multiple: true,
+        filters: [
+          { name: "Audio", extensions: ["wav", "mp3", "m4a", "flac", "ogg", "aac", "opus"] },
+        ],
+      });
+      const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
+      if (paths.length === 0) return;
+      const imported = await api.importAudio(paths);
+      let done = 0;
+      setImporting({ total: imported.length, done });
+      for (const note of imported) {
+        setCurrentNote(note);
+        await runProcessing(note.id, settings.defaultStyleId);
+        done += 1;
+        setImporting({ total: imported.length, done });
+      }
+      await refreshNotes();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setImporting(null);
+    }
+  };
+
+  const researchCurrentNote = async () => {
+    if (!currentNote) return;
+    try {
+      setRecording({ status: "researching", noteId: currentNote.id });
+      const note = await api.researchNote(currentNote.id);
+      setCurrentNote(note);
+      await refreshNotes();
+    } catch (e) {
+      fail(e);
+    } finally {
+      setRecording({ status: "idle" });
     }
   };
 
@@ -251,6 +305,7 @@ export function HaloProvider({ children }: { children: ReactNode }) {
       recording,
       level,
       streamBuffer,
+      importing,
       error,
       refreshAll,
       saveSettings,
@@ -258,16 +313,18 @@ export function HaloProvider({ children }: { children: ReactNode }) {
       openNote,
       closeNote,
       startNewRecording,
+      importRecordings,
       stopRecording,
       cancelRecording,
       regenerate,
+      researchCurrentNote,
       updateNoteContent,
       updateNoteTitle,
       persistCurrentNote,
       deleteNote,
       clearError: () => setError(null),
     }),
-    [status, settings, models, styles, notes, currentNote, view, recording, level, streamBuffer, error],
+    [status, settings, models, styles, notes, currentNote, view, recording, level, streamBuffer, importing, error],
   );
 
   return <HaloContext.Provider value={value}>{children}</HaloContext.Provider>;

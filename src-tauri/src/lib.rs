@@ -3,9 +3,11 @@
 mod audio;
 mod calendar;
 mod commands;
+mod import;
 mod integrations;
 mod llm;
 mod models;
+mod research;
 mod state;
 mod storage;
 mod transcribe;
@@ -55,6 +57,8 @@ pub fn run() {
             commands::save_note,
             commands::delete_note,
             commands::export_note,
+            commands::import_audio,
+            commands::research_note,
             commands::get_calendar_events,
             commands::suggested_note_title,
         ])

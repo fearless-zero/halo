@@ -216,6 +216,7 @@ mod tests {
             transcript: None,
             audio_path: None,
             duration_secs: 12.0,
+            research: Vec::new(),
         }
     }
 

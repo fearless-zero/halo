@@ -43,6 +43,8 @@ describe("api command wrappers", () => {
       [api.saveNote(note), "save_note", { note }],
       [api.deleteNote("n"), "delete_note", { id: "n" }],
       [api.exportNote("n", { kind: "markdown" }), "export_note", { id: "n", target: { kind: "markdown" } }],
+      [api.importAudio(["/a.wav"]), "import_audio", { paths: ["/a.wav"] }],
+      [api.researchNote("n"), "research_note", { noteId: "n" }],
       [api.getCalendarEvents(), "get_calendar_events", undefined],
       [api.suggestedNoteTitle(), "suggested_note_title", undefined],
     ];

@@ -15,7 +15,8 @@ const INTEGRATION_FIELDS: Record<string, Field[]> = {
   obsidian: [{ key: "folder", placeholder: "Path to your Obsidian vault (e.g. ~/Obsidian/Notes)" }],
   notion: [
     { key: "token", placeholder: "Notion integration token (secret_…)" },
-    { key: "database", placeholder: "Notion database ID" },
+    { key: "database", placeholder: "Notion database ID (fallback / manual target)" },
+    { key: "route", placeholder: "Set to 'auto' to file each note in the best-matching database", help: "Smart routing searches your workspace and picks the most relevant database per note." },
   ],
   slack: [{ key: "webhook", placeholder: "Slack incoming webhook URL" }],
   webhook: [{ key: "url", placeholder: "POST notes as JSON to this URL" }],
@@ -192,6 +193,18 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               onChange={(e) => saveSettings({ ...settings, captureMicrophone: e.target.checked })}
             />
             Capture microphone (your voice)
+          </label>
+        </section>
+
+        <section className="settings-section">
+          <h3>Research</h3>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={settings.webResearch}
+              onChange={(e) => saveSettings({ ...settings, webResearch: e.target.checked })}
+            />
+            Enrich notes with web research when online (uses Wikipedia)
           </label>
         </section>
 

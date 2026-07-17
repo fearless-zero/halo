@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useHalo } from "../store";
 import { NoteDetail } from "./NoteDetail";
-import { MicIcon, StopIcon } from "./icons";
+import { ImportIcon, MicIcon, StopIcon } from "./icons";
 
 function LevelMeter({ rms, peak }: { rms: number; peak: number }) {
   const bars = 24;
@@ -70,7 +70,7 @@ function Processing({ label, percent }: { label: string; percent?: number }) {
 }
 
 function EmptyState() {
-  const { startNewRecording } = useHalo();
+  const { startNewRecording, importRecordings } = useHalo();
   return (
     <div className="empty-state">
       <div className="empty-icon">
@@ -78,18 +78,38 @@ function EmptyState() {
       </div>
       <h2>Ready when you are</h2>
       <p className="muted">
-        Start a recording before your meeting, lecture or call. Halo captures the audio,
-        transcribes it locally, and writes your notes.
+        Start a recording before your meeting, lecture or call — or import existing
+        recordings (from a voice recorder, USB or SD card). Halo transcribes locally,
+        writes your notes, and researches the topics for you.
       </p>
-      <button className="btn btn-primary btn-lg" onClick={() => void startNewRecording()}>
-        <MicIcon width={18} height={18} /> Start recording
-      </button>
+      <div className="empty-actions">
+        <button className="btn btn-primary btn-lg" onClick={() => void startNewRecording()}>
+          <MicIcon width={18} height={18} /> Start recording
+        </button>
+        <button className="btn btn-lg" onClick={() => void importRecordings()}>
+          <ImportIcon width={18} height={18} /> Import recordings
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ImportBanner({ total, done }: { total: number; done: number }) {
+  return (
+    <div className="import-banner" role="status">
+      <div className="spinner" />
+      <p>
+        Processing recording {Math.min(done + 1, total)} of {total}…
+      </p>
+      <div className="progress wide">
+        <div className="progress-bar" style={{ width: `${(done / total) * 100}%` }} />
+      </div>
     </div>
   );
 }
 
 export function MainPane() {
-  const { recording, currentNote } = useHalo();
+  const { recording, currentNote, importing } = useHalo();
 
   if (recording.status === "recording") {
     return (
@@ -102,6 +122,7 @@ export function MainPane() {
   if (recording.status === "transcribing") {
     return (
       <main className="main-pane centered">
+        {importing && <ImportBanner total={importing.total} done={importing.done} />}
         <Processing label="Transcribing audio…" percent={recording.percent} />
       </main>
     );
@@ -111,6 +132,14 @@ export function MainPane() {
     return (
       <main className="main-pane">
         <NoteDetail streaming />
+      </main>
+    );
+  }
+
+  if (recording.status === "researching") {
+    return (
+      <main className="main-pane centered">
+        <Processing label="Researching topics online…" />
       </main>
     );
   }
@@ -125,6 +154,7 @@ export function MainPane() {
 
   return (
     <main className="main-pane centered">
+      {importing && <ImportBanner total={importing.total} done={importing.done} />}
       <EmptyState />
     </main>
   );

@@ -242,7 +242,7 @@ impl Recorder {
     }
 }
 
-fn resample_to_target(input: &[f32], from: u32) -> Vec<f32> {
+pub(crate) fn resample_to_target(input: &[f32], from: u32) -> Vec<f32> {
     if from == TARGET_RATE || input.is_empty() {
         return input.to_vec();
     }
@@ -283,7 +283,7 @@ fn mix(captures: &[Arc<Mutex<CaptureData>>]) -> Vec<f32> {
     out
 }
 
-fn write_wav(path: &Path, samples: &[f32]) -> Result<()> {
+pub(crate) fn write_wav(path: &Path, samples: &[f32]) -> Result<()> {
     let spec = hound::WavSpec {
         channels: 1,
         sample_rate: TARGET_RATE,

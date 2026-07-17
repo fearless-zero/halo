@@ -15,6 +15,7 @@ afterEach(() => {
 
 const actions = {
   regenerate: vi.fn(),
+  researchCurrentNote: vi.fn(),
   updateNoteContent: vi.fn(),
   updateNoteTitle: vi.fn(),
   persistCurrentNote: vi.fn(),
@@ -31,6 +32,7 @@ const note = {
   transcript: { segments: [{ start: 65, end: 70, text: "hello" }], text: "hello world", language: "en" },
   audioPath: null,
   durationSecs: 120,
+  research: [],
 };
 
 const styles = [
@@ -42,7 +44,7 @@ function setCtx(over: Record<string, unknown> = {}) {
   (useHalo as unknown as Mock).mockReturnValue({
     currentNote: note,
     styles,
-    settings: { integrations: [{ id: "notion", enabled: true, options: {} }, { id: "slack", enabled: false, options: {} }] },
+    settings: { webResearch: true, integrations: [{ id: "notion", enabled: true, options: {} }, { id: "slack", enabled: false, options: {} }] },
     streamBuffer: "streaming text",
     ...actions,
     ...over,
@@ -152,5 +154,43 @@ describe("NoteDetail", () => {
     render(<NoteDetail streaming />);
     expect(screen.getByText("streaming text")).toBeTruthy();
     expect(screen.queryByText("Edit")).toBeNull();
+  });
+
+  it("triggers on-demand research when web research is enabled", () => {
+    setCtx();
+    render(<NoteDetail />);
+    fireEvent.click(screen.getByText("Research"));
+    expect(actions.researchCurrentNote).toHaveBeenCalled();
+  });
+
+  it("hides the research button when web research is disabled", () => {
+    setCtx({ settings: { webResearch: false, integrations: [] } });
+    render(<NoteDetail />);
+    expect(screen.queryByText("Research")).toBeNull();
+  });
+
+  it("renders research sources with and without links", () => {
+    setCtx({
+      currentNote: {
+        ...note,
+        research: [
+          { title: "Photosynthesis", summary: "s", url: "https://en.wikipedia.org/wiki/Photosynthesis", source: "Wikipedia" },
+          { title: "No Link Topic", summary: "s2", url: "", source: "Wikipedia" },
+        ],
+      },
+    });
+    render(<NoteDetail />);
+    expect(screen.getByText("Sources")).toBeTruthy();
+    const link = screen.getByText("Photosynthesis") as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("https://en.wikipedia.org/wiki/Photosynthesis");
+    expect(screen.getByText("No Link Topic").tagName).toBe("SPAN");
+  });
+
+  it("hides sources while streaming", () => {
+    setCtx({
+      currentNote: { ...note, research: [{ title: "T", summary: "s", url: "", source: "Wikipedia" }] },
+    });
+    render(<NoteDetail streaming />);
+    expect(screen.queryByText("Sources")).toBeNull();
   });
 });

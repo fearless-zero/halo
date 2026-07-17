@@ -108,6 +108,7 @@ pub fn create_note(state: State<'_, AppState>, title: String) -> R<Note> {
         transcript: None,
         audio_path: None,
         duration_secs: 0.0,
+        research: Vec::new(),
     };
     storage::save_note(&state.base_dir, &note).map_err(err)?;
     Ok(note)
@@ -257,6 +258,58 @@ pub async fn export_note(
     let note = storage::load_note(&base, &id).map_err(err)?;
     let settings = state.settings.lock().unwrap().clone();
     Ok(integrations::export(&app, &base, &settings, &note, target).await)
+}
+
+#[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub fn import_audio(state: State<'_, AppState>, paths: Vec<String>) -> R<Vec<Note>> {
+    let base = state.base_dir.clone();
+    let style_id = state.settings.lock().unwrap().default_style_id.clone();
+    let mut created = Vec::new();
+    for p in paths {
+        let src = std::path::PathBuf::from(&p);
+        let id = uuid::Uuid::new_v4().to_string();
+        let wav = storage::audio_path(&base, &id);
+        let duration = crate::import::import_to_wav(&src, &wav).map_err(err)?;
+        let ts = now();
+        let note = Note {
+            id,
+            title: crate::import::title_from_path(&src),
+            created_at: ts.clone(),
+            updated_at: ts,
+            style_id: style_id.clone(),
+            content: String::new(),
+            transcript: None,
+            audio_path: Some(wav.to_string_lossy().to_string()),
+            duration_secs: duration,
+            research: Vec::new(),
+        };
+        storage::save_note(&base, &note).map_err(err)?;
+        created.push(note);
+    }
+    Ok(created)
+}
+
+#[tauri::command]
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub async fn research_note(state: State<'_, AppState>, note_id: String) -> R<Note> {
+    let base = state.base_dir.clone();
+    let mut note = storage::load_note(&base, &note_id).map_err(err)?;
+    let queries = crate::research::extract_queries(&note.title, &note.content, 4);
+    if queries.is_empty() {
+        return Ok(note);
+    }
+    let findings = crate::research::research(crate::research::WIKI_BASE, &queries).await;
+    if findings.is_empty() {
+        // Offline or nothing found — leave the note untouched.
+        return Ok(note);
+    }
+    note.content = crate::research::strip_section(&note.content);
+    note.content.push_str(&crate::research::render_section(&findings));
+    note.research = findings;
+    note.updated_at = now();
+    storage::save_note(&base, &note).map_err(err)?;
+    Ok(note)
 }
 
 #[tauri::command]

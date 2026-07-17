@@ -3,7 +3,7 @@ import { useHalo } from "../store";
 import { api } from "../ipc";
 import { renderMarkdown } from "../markdown";
 import type { ExportTarget } from "../types";
-import { CopyIcon, DownloadIcon, SparkleIcon, TrashIcon } from "./icons";
+import { CopyIcon, DownloadIcon, SearchIcon, SparkleIcon, TrashIcon } from "./icons";
 
 export function NoteDetail({ streaming = false }: { streaming?: boolean }) {
   const {
@@ -12,6 +12,7 @@ export function NoteDetail({ streaming = false }: { streaming?: boolean }) {
     settings,
     streamBuffer,
     regenerate,
+    researchCurrentNote,
     updateNoteContent,
     updateNoteTitle,
     persistCurrentNote,
@@ -89,6 +90,16 @@ export function NoteDetail({ streaming = false }: { streaming?: boolean }) {
           >
             Regenerate
           </button>
+          {settings?.webResearch && (
+            <button
+              className="btn btn-sm"
+              disabled={streaming}
+              title="Research this note's topics online"
+              onClick={() => void researchCurrentNote()}
+            >
+              <SearchIcon width={15} height={15} /> Research
+            </button>
+          )}
         </div>
         <div className="note-export">
           <button className="btn btn-sm" onClick={() => void doExport({ kind: "clipboard", format: "markdown" })}>
@@ -123,6 +134,28 @@ export function NoteDetail({ streaming = false }: { streaming?: boolean }) {
         <div className="note-content">
           <div className="markdown" dangerouslySetInnerHTML={{ __html: rendered }} />
           {streaming && <span className="cursor-blink">▍</span>}
+        </div>
+      )}
+
+      {!streaming && currentNote.research.length > 0 && (
+        <div className="sources-block">
+          <h3 className="sources-head">
+            <SearchIcon width={15} height={15} /> Sources
+          </h3>
+          <ul className="sources-list">
+            {currentNote.research.map((r, i) => (
+              <li key={i}>
+                {r.url ? (
+                  <a href={r.url} target="_blank" rel="noreferrer noopener">
+                    {r.title}
+                  </a>
+                ) : (
+                  <span>{r.title}</span>
+                )}
+                <span className="muted"> · {r.source}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

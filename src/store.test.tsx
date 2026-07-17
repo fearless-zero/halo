@@ -1,6 +1,8 @@
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+
 vi.mock("./ipc", () => ({
   api: {
     getAppStatus: vi.fn(),
@@ -16,6 +18,8 @@ vi.mock("./ipc", () => ({
     cancelRecording: vi.fn(),
     transcribe: vi.fn(),
     generateNotes: vi.fn(),
+    researchNote: vi.fn(),
+    importAudio: vi.fn(),
     saveNote: vi.fn(),
     deleteNote: vi.fn(),
     suggestedNoteTitle: vi.fn(),
@@ -27,6 +31,7 @@ vi.mock("./ipc", () => ({
   },
 }));
 
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, events } from "./ipc";
 import { HaloProvider, useHalo } from "./store";
 import type { Note, Settings } from "./types";
@@ -43,6 +48,7 @@ const baseSettings: Settings = {
   inputDeviceId: null,
   captureSystemAudio: true,
   captureMicrophone: true,
+  webResearch: true,
   integrations: [],
 };
 
@@ -56,6 +62,7 @@ const baseNote: Note = {
   transcript: null,
   audioPath: null,
   durationSecs: 0,
+  research: [],
 };
 
 let ctx!: ReturnType<typeof useHalo>;
@@ -88,6 +95,16 @@ beforeEach(() => {
   m(api.generateNotes).mockImplementation((id: string, styleId: string) =>
     Promise.resolve({ ...baseNote, id, styleId, content: "# Notes" }),
   );
+  m(api.researchNote).mockImplementation((id: string) =>
+    Promise.resolve({ ...baseNote, id, content: "# Notes", research: [
+      { title: "Topic", summary: "s", url: "https://en.wikipedia.org/wiki/Topic", source: "Wikipedia" },
+    ] }),
+  );
+  m(api.importAudio).mockResolvedValue([
+    { ...baseNote, id: "imp1", title: "Class 1" },
+    { ...baseNote, id: "imp2", title: "Class 2" },
+  ]);
+  m(openDialog).mockResolvedValue(["/recordings/class1.m4a", "/recordings/class2.m4a"]);
   m(api.saveNote).mockImplementation((note: Note) => Promise.resolve(note));
   m(api.deleteNote).mockResolvedValue(undefined);
   m(api.cancelRecording).mockResolvedValue(undefined);
@@ -270,6 +287,155 @@ describe("recording flow", () => {
       await ctx.startNewRecording();
     });
     expect(lastArg(api.createNote, 0)).toBe("New recording");
+  });
+});
+
+describe("web research", () => {
+  it("researches after generating when webResearch is on", async () => {
+    await mount();
+    await act(async () => {
+      await ctx.startNewRecording();
+    });
+    await act(async () => {
+      await ctx.stopRecording();
+    });
+    expect(api.researchNote).toHaveBeenCalled();
+    expect(ctx.currentNote?.research).toHaveLength(1);
+  });
+
+  it("skips research when webResearch is off", async () => {
+    m(api.getSettings).mockResolvedValue({ ...baseSettings, webResearch: false });
+    await mount();
+    await act(async () => {
+      await ctx.openNote("r");
+    });
+    await act(async () => {
+      await ctx.regenerate("meeting");
+    });
+    expect(api.researchNote).not.toHaveBeenCalled();
+  });
+
+  it("keeps the generated note when research fails mid-processing", async () => {
+    await mount();
+    await act(async () => {
+      await ctx.openNote("r");
+    });
+    m(api.researchNote).mockRejectedValueOnce(new Error("offline"));
+    await act(async () => {
+      await ctx.regenerate("meeting");
+    });
+    // Research failure is swallowed; the generated note stays.
+    expect(ctx.currentNote?.content).toBe("# Notes");
+    expect(ctx.error).toBeNull();
+  });
+
+  it("skips research during processing when settings are unavailable", async () => {
+    m(api.getSettings).mockRejectedValue(new Error("no settings"));
+    render(
+      <HaloProvider>
+        <Capture />
+      </HaloProvider>,
+    );
+    await waitFor(() => expect(ctx.error).toBe("no settings"));
+    await act(async () => {
+      await ctx.openNote("x");
+    });
+    await act(async () => {
+      await ctx.regenerate("meeting");
+    });
+    expect(api.generateNotes).toHaveBeenCalled();
+    expect(api.researchNote).not.toHaveBeenCalled();
+  });
+
+  it("researches the current note on demand", async () => {
+    await mount();
+    await act(async () => {
+      await ctx.openNote("manual");
+    });
+    await act(async () => {
+      await ctx.researchCurrentNote();
+    });
+    expect(api.researchNote).toHaveBeenCalledWith("manual");
+    expect(ctx.currentNote?.research).toHaveLength(1);
+    expect(ctx.recording.status).toBe("idle");
+  });
+
+  it("no-ops manual research with no current note and captures errors", async () => {
+    await mount();
+    await act(async () => {
+      await ctx.researchCurrentNote();
+    });
+    expect(api.researchNote).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await ctx.openNote("m2");
+    });
+    m(api.researchNote).mockRejectedValueOnce(new Error("net down"));
+    await act(async () => {
+      await ctx.researchCurrentNote();
+    });
+    expect(ctx.error).toBe("net down");
+    expect(ctx.recording.status).toBe("idle");
+  });
+});
+
+describe("import recordings", () => {
+  it("imports selected files and processes each", async () => {
+    await mount();
+    await act(async () => {
+      await ctx.importRecordings();
+    });
+    expect(api.importAudio).toHaveBeenCalledWith([
+      "/recordings/class1.m4a",
+      "/recordings/class2.m4a",
+    ]);
+    expect(m(api.transcribe).mock.calls.length).toBe(2);
+    expect(m(api.generateNotes).mock.calls.length).toBe(2);
+    expect(ctx.importing).toBeNull();
+  });
+
+  it("wraps a single-file selection into a list", async () => {
+    m(openDialog).mockResolvedValueOnce("/recordings/only.wav");
+    m(api.importAudio).mockResolvedValueOnce([{ ...baseNote, id: "one" }]);
+    await mount();
+    await act(async () => {
+      await ctx.importRecordings();
+    });
+    expect(api.importAudio).toHaveBeenCalledWith(["/recordings/only.wav"]);
+  });
+
+  it("does nothing when the dialog is cancelled", async () => {
+    m(openDialog).mockResolvedValueOnce(null);
+    await mount();
+    await act(async () => {
+      await ctx.importRecordings();
+    });
+    expect(api.importAudio).not.toHaveBeenCalled();
+    expect(ctx.importing).toBeNull();
+  });
+
+  it("captures import errors", async () => {
+    m(api.importAudio).mockRejectedValueOnce(new Error("bad file"));
+    await mount();
+    await act(async () => {
+      await ctx.importRecordings();
+    });
+    expect(ctx.error).toBe("bad file");
+    expect(ctx.importing).toBeNull();
+  });
+
+  it("guards import when settings failed to load", async () => {
+    m(api.getSettings).mockRejectedValue(new Error("no settings"));
+    render(
+      <HaloProvider>
+        <Capture />
+      </HaloProvider>,
+    );
+    await waitFor(() => expect(ctx.error).toBe("no settings"));
+    await act(async () => {
+      await ctx.importRecordings();
+    });
+    expect(openDialog).not.toHaveBeenCalled();
   });
 });
 

@@ -1,18 +1,20 @@
 # Halo
 
-Open-source, lightweight AI notetaking app — like Granola, but fully local and private. Halo captures the audio of your meetings, lectures and conversations (online **or** offline), transcribes it on-device, and writes clean notes for you. Nothing leaves your machine: transcription and note-writing both run locally.
+Open-source, lightweight AI notetaking app — like Granola, but local-first and private. Halo captures the audio of your meetings, lectures and conversations (online **or** offline), transcribes it on-device, and writes clean notes for you. Transcription and note-writing always run locally on your machine; when you're online, Halo can additionally research each note's topics on the web and fold the findings in.
 
 Built with **Tauri** (Rust backend) + **React** + **TypeScript**.
 
 ## How it works
 
 - **Audio capture** — records your microphone *and* your computer's system audio (the other participants) via [`cpal`], mixes them, and downsamples to 16 kHz mono.
+- **Import existing recordings** — point Halo at audio files from a voice recorder, USB stick or SD card (WAV, MP3, M4A, FLAC, OGG, AAC, Opus — decoded with [Symphonia]). Import a whole day of classes at once and Halo processes each recording into its own note.
 - **Transcription** — [whisper.cpp] (Whisper base, MIT) runs on-device.
-- **Note writing** — [llama.cpp] serving **Qwen3-4B-Instruct** (Apache-2.0), a fully-open model, turns the transcript into structured notes using your chosen style.
-- **Storage** — notes live as plain JSON in your app-data directory. No database, no cloud, no account.
-- **Integrations** — Markdown export, Obsidian, clipboard, Notion, Slack, a generic webhook, and Google / Apple / Microsoft calendars (via secret iCal feeds, used to auto-title recordings with the meeting that's happening). The integration layer is extensible.
+- **Note writing** — [llama.cpp] serving **Qwen3-4B-Instruct** (Apache-2.0), a fully-open model, turns the transcript into structured notes using your chosen style, and detects the topic to title each note.
+- **Web research** — when online, Halo researches the note's title and section topics on Wikipedia (keyless, fully-open content) and appends a sourced *Background & Research* section. Toggle it off to stay fully offline.
+- **Storage** — notes live as plain JSON in your app-data directory. No database, no account.
+- **Integrations** — Markdown export, Obsidian, clipboard, Notion, Slack, a generic webhook, and Google / Apple / Microsoft calendars (via secret iCal feeds, used to auto-title recordings with the meeting that's happening). Notion supports **smart routing** — set `route` to `auto` and each note is filed in the workspace database that best matches its topic. The integration layer is extensible.
 
-Both inference engines are bundled with the app as sidecar binaries, and the models are downloaded once on first launch. After setup, Halo works completely offline.
+Both inference engines are bundled with the app as sidecar binaries, and the models are downloaded once on first launch. After setup, transcription and note-writing work completely offline; web research and cloud integrations use the network only when enabled.
 
 ## Prerequisites
 
@@ -83,8 +85,8 @@ Microphone-only capture works everywhere with no extra setup. Both sources are t
   - `store.tsx` — app state and the record → transcribe → generate flow
   - `screens/`, `components/` — UI
 - `src-tauri/src/` — Rust backend
-  - `audio.rs` — capture & mixing · `transcribe.rs` — whisper.cpp · `llm.rs` — llama.cpp
-  - `models.rs` — model downloads · `storage.rs` — local notes · `integrations.rs` — exports
+  - `audio.rs` — capture & mixing · `import.rs` — audio-file import (Symphonia) · `transcribe.rs` — whisper.cpp · `llm.rs` — llama.cpp
+  - `models.rs` — model downloads · `storage.rs` — local notes · `integrations.rs` — exports & Notion routing · `research.rs` — web research
   - `commands.rs` — Tauri command surface
 - `scripts/fetch-sidecars.sh` — builds the bundled inference engines
 - `.github/workflows/` — CI (typecheck, tests, frontend build, backend compile on 3 OSes)
@@ -97,3 +99,4 @@ Microphone-only capture works everywhere with no extra setup. Both sources are t
 [`cpal`]: https://github.com/RustAudio/cpal
 [whisper.cpp]: https://github.com/ggml-org/whisper.cpp
 [llama.cpp]: https://github.com/ggml-org/llama.cpp
+[Symphonia]: https://github.com/pdeljanov/Symphonia

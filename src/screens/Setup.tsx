@@ -146,6 +146,14 @@ export function Setup() {
               />
               Capture microphone (your voice)
             </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={settings.webResearch}
+                onChange={(e) => saveSettings({ ...settings, webResearch: e.target.checked })}
+              />
+              Enrich notes with web research when online (uses Wikipedia)
+            </label>
             <button className="btn btn-primary btn-lg" onClick={() => setStep(3)}>
               Continue
             </button>

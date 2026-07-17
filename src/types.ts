@@ -59,6 +59,13 @@ export interface CalendarEvent {
   provider: string;
 }
 
+export interface ResearchFinding {
+  title: string;
+  summary: string;
+  url: string;
+  source: string;
+}
+
 export interface IntegrationConfig {
   id: IntegrationId;
   enabled: boolean;
@@ -75,6 +82,8 @@ export interface Settings {
   captureSystemAudio: boolean;
   /** Capture the microphone (the user's own voice). */
   captureMicrophone: boolean;
+  /** When online, enrich generated notes with web research. */
+  webResearch: boolean;
   integrations: IntegrationConfig[];
 }
 
@@ -103,6 +112,8 @@ export interface Note {
   /** Path to the recorded audio on disk, if retained. */
   audioPath: string | null;
   durationSecs: number;
+  /** Web-research findings folded into the note. */
+  research: ResearchFinding[];
 }
 
 export interface NoteSummary {
@@ -118,7 +129,14 @@ export type RecordingState =
   | { status: "idle" }
   | { status: "recording"; startedAt: number; noteId: string }
   | { status: "transcribing"; noteId: string; percent: number }
-  | { status: "generating"; noteId: string };
+  | { status: "generating"; noteId: string }
+  | { status: "researching"; noteId: string };
+
+/** Progress of a batch import (e.g. a day of class recordings). */
+export interface ImportProgress {
+  total: number;
+  done: number;
+}
 
 export interface AudioLevel {
   rms: number;

@@ -116,17 +116,98 @@ fn export_clipboard<R: Runtime>(app: &AppHandle<R>, note: &Note, format: &str) -
     Ok(ExportResult { ok: true, location: None, message: "Copied to clipboard".into() })
 }
 
+/// Split a string into lowercase alphanumeric word tokens (len > 2).
+fn tokenize(s: &str) -> std::collections::HashSet<String> {
+    s.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() > 2)
+        .map(|w| w.to_string())
+        .collect()
+}
+
+/// Collect (id, title) of every database in a Notion `/v1/search` response.
+fn parse_databases(json: &Value) -> Vec<(String, String)> {
+    json["results"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter(|r| r["object"] == "database")
+                .filter_map(|r| {
+                    let id = r["id"].as_str()?;
+                    let title = r["title"]
+                        .as_array()
+                        .and_then(|t| t.first())
+                        .and_then(|t| t["plain_text"].as_str())
+                        .unwrap_or("");
+                    Some((id.to_string(), title.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Pick the database whose title best overlaps the note title; the first
+/// database is the fallback when nothing overlaps.
+fn pick_database(dbs: &[(String, String)], note_title: &str) -> Option<String> {
+    let want = tokenize(note_title);
+    let mut best: Option<(usize, &str)> = None;
+    for (id, title) in dbs {
+        let score = tokenize(title).iter().filter(|t| want.contains(*t)).count();
+        if best.map(|(s, _)| score > s).unwrap_or(true) {
+            best = Some((score, id));
+        }
+    }
+    best.map(|(_, id)| id.to_string())
+}
+
+async fn notion_search_database(
+    client: &reqwest::Client,
+    base_url: &str,
+    token: &str,
+    version: &str,
+    query: &str,
+) -> Result<Option<String>> {
+    let resp = client
+        .post(format!("{base_url}/v1/search"))
+        .bearer_auth(token)
+        .header("Notion-Version", version)
+        .json(&json!({
+            "query": query,
+            "filter": { "property": "object", "value": "database" },
+            "page_size": 20
+        }))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("Notion search returned {}", resp.status()));
+    }
+    let body: Value = resp.json().await?;
+    Ok(pick_database(&parse_databases(&body), query))
+}
+
 async fn export_notion(settings: &Settings, note: &Note) -> Result<ExportResult> {
     let cfg = integration(settings, "notion").ok_or_else(|| anyhow!("Notion not configured"))?;
     let token = cfg.options.get("token").filter(|t| !t.is_empty())
         .ok_or_else(|| anyhow!("Add your Notion token in Settings"))?;
-    let database_id = cfg.options.get("database").filter(|d| !d.is_empty())
-        .ok_or_else(|| anyhow!("Add a Notion database ID in Settings"))?;
     // Base URL is overridable so tests can target a mock server.
     let base_url = cfg.options.get("base").map(|s| s.as_str()).unwrap_or("https://api.notion.com");
 
     let client = reqwest::Client::new();
     let version = "2022-06-28";
+
+    // Smart routing: when route == "auto", search the workspace and file the
+    // note in the database that best matches its title, falling back to any
+    // explicitly configured database.
+    let configured = cfg.options.get("database").filter(|d| !d.is_empty()).cloned();
+    let route_auto = cfg.options.get("route").map(|r| r == "auto").unwrap_or(false);
+    let database_id = if route_auto {
+        match notion_search_database(&client, base_url, token, version, &note.title).await? {
+            Some(id) => id,
+            None => configured.ok_or_else(|| anyhow!("No matching Notion database found"))?,
+        }
+    } else {
+        configured.ok_or_else(|| anyhow!("Add a Notion database ID in Settings"))?
+    };
 
     let db: Value = client
         .get(format!("{base_url}/v1/databases/{database_id}"))
@@ -216,6 +297,7 @@ mod tests {
             transcript: None,
             audio_path: None,
             duration_secs: 60.0,
+            research: Vec::new(),
         }
     }
 
@@ -400,6 +482,105 @@ mod tests {
         let mut no_db = Settings::default();
         set_opt(&mut no_db, "notion", "token", "t");
         assert!(export_notion(&no_db, &note()).await.is_err()); // no database
+    }
+
+    #[test]
+    fn tokenize_and_pick_database() {
+        let dbs = vec![
+            ("db-lectures".to_string(), "Biology Lectures".to_string()),
+            ("db-personal".to_string(), "Personal Journal".to_string()),
+        ];
+        // Overlap on "biology" -> lectures database.
+        assert_eq!(pick_database(&dbs, "Biology 101 — Cells").as_deref(), Some("db-lectures"));
+        // No overlap -> first database as fallback.
+        assert_eq!(pick_database(&dbs, "Grocery run").as_deref(), Some("db-lectures"));
+        // No databases -> None.
+        assert_eq!(pick_database(&[], "anything"), None);
+    }
+
+    #[test]
+    fn parse_databases_filters_non_databases() {
+        let body = json!({
+            "results": [
+                { "object": "database", "id": "d1", "title": [{ "plain_text": "Notes" }] },
+                { "object": "page", "id": "p1" },
+                { "object": "database", "id": "d2" }
+            ]
+        });
+        let dbs = parse_databases(&body);
+        assert_eq!(dbs, vec![("d1".into(), "Notes".into()), ("d2".into(), "".into())]);
+        assert!(parse_databases(&json!({})).is_empty());
+    }
+
+    #[tokio::test]
+    async fn notion_auto_route_files_into_best_database() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/search"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "results": [{ "object": "database", "id": "meeting-db", "title": [{ "plain_text": "My Meeting Notes" }] }]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/databases/meeting-db"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "properties": { "Name": { "type": "title" } } })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/pages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "url": "https://notion.so/routed" })))
+            .mount(&server)
+            .await;
+
+        let mut s = Settings::default();
+        set_opt(&mut s, "notion", "token", "secret_t");
+        set_opt(&mut s, "notion", "route", "auto");
+        set_opt(&mut s, "notion", "base", &server.uri());
+        let res = export_notion(&s, &note()).await.unwrap();
+        assert_eq!(res.location.as_deref(), Some("https://notion.so/routed"));
+    }
+
+    #[tokio::test]
+    async fn notion_auto_route_falls_back_and_errors_without_target() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/search"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "results": [] })))
+            .mount(&server)
+            .await;
+
+        // No search hit and no configured database -> error.
+        let mut none = Settings::default();
+        set_opt(&mut none, "notion", "token", "t");
+        set_opt(&mut none, "notion", "route", "auto");
+        set_opt(&mut none, "notion", "base", &server.uri());
+        assert!(export_notion(&none, &note()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn notion_auto_route_reports_search_error() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/search"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let mut s = Settings::default();
+        set_opt(&mut s, "notion", "token", "t");
+        set_opt(&mut s, "notion", "route", "auto");
+        set_opt(&mut s, "notion", "base", &server.uri());
+        assert!(export_notion(&s, &note()).await.is_err());
     }
 
     // ---- Dispatcher ----

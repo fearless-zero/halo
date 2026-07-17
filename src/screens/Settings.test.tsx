@@ -26,6 +26,7 @@ const settings = {
   inputDeviceId: null,
   captureSystemAudio: true,
   captureMicrophone: true,
+  webResearch: true,
   integrations: [
     { id: "markdown", enabled: true, options: {} },
     { id: "notion", enabled: true, options: {} },
@@ -104,6 +105,10 @@ describe("SettingsPanel", () => {
     fireEvent.change(screen.getByPlaceholderText(/Notion integration token/), { target: { value: "t" } });
     fireEvent.change(screen.getByPlaceholderText(/Slack incoming webhook/), { target: { value: "w" } });
     fireEvent.change(screen.getByPlaceholderText(/Secret iCal/), { target: { value: "u" } });
+    // notion smart-routing field
+    fireEvent.change(screen.getByPlaceholderText(/best-matching database/), { target: { value: "auto" } });
+    // web research toggle
+    fireEvent.click(screen.getByLabelText(/Enrich notes with web research/));
     // toggle an integration off
     fireEvent.click(screen.getByLabelText("Slack"));
     expect(saveSettings).toHaveBeenCalled();

@@ -55,6 +55,10 @@ pub struct IntegrationConfig {
     pub options: HashMap<String, String>,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -63,6 +67,9 @@ pub struct Settings {
     pub input_device_id: Option<String>,
     pub capture_system_audio: bool,
     pub capture_microphone: bool,
+    /// When online, enrich generated notes with web research (Wikipedia).
+    #[serde(default = "default_true")]
+    pub web_research: bool,
     pub integrations: Vec<IntegrationConfig>,
 }
 
@@ -74,6 +81,7 @@ impl Default for Settings {
             input_device_id: None,
             capture_system_audio: true,
             capture_microphone: true,
+            web_research: true,
             integrations: vec![
                 IntegrationConfig { id: "markdown".into(), enabled: false, options: HashMap::new() },
                 IntegrationConfig { id: "obsidian".into(), enabled: false, options: HashMap::new() },
@@ -117,6 +125,18 @@ pub struct Note {
     pub transcript: Option<Transcript>,
     pub audio_path: Option<String>,
     pub duration_secs: f64,
+    /// Web-research findings folded into the note (empty when offline/disabled).
+    #[serde(default)]
+    pub research: Vec<ResearchFinding>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResearchFinding {
+    pub title: String,
+    pub summary: String,
+    pub url: String,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -221,6 +241,32 @@ mod tests {
         assert!(matches!(clip, ExportTarget::Clipboard { format } if format == "plain"));
         assert!(matches!(serde_json::from_str::<ExportTarget>(r#"{"kind":"markdown"}"#).unwrap(), ExportTarget::Markdown));
         assert!(matches!(serde_json::from_str::<ExportTarget>(r#"{"kind":"slack"}"#).unwrap(), ExportTarget::Slack));
+    }
+
+    #[test]
+    fn web_research_defaults_true_when_absent() {
+        // Old settings files predate the field; it must default on.
+        let json = r#"{"setupComplete":false,"defaultStyleId":"meeting","inputDeviceId":null,"captureSystemAudio":true,"captureMicrophone":true,"integrations":[]}"#;
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert!(s.web_research);
+        assert!(Settings::default().web_research);
+    }
+
+    #[test]
+    fn note_research_defaults_empty_and_roundtrips() {
+        let json = r#"{"id":"n","title":"t","createdAt":"","updatedAt":"","styleId":"meeting","content":"","transcript":null,"audioPath":null,"durationSecs":0.0}"#;
+        let note: Note = serde_json::from_str(json).unwrap();
+        assert!(note.research.is_empty());
+
+        let finding = ResearchFinding {
+            title: "Photosynthesis".into(),
+            summary: "A process".into(),
+            url: "https://en.wikipedia.org/wiki/Photosynthesis".into(),
+            source: "Wikipedia".into(),
+        };
+        let back: ResearchFinding =
+            serde_json::from_str(&serde_json::to_string(&finding).unwrap()).unwrap();
+        assert_eq!(back, finding);
     }
 
     #[test]

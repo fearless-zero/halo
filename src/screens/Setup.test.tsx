@@ -28,6 +28,7 @@ const settings = {
   inputDeviceId: null,
   captureSystemAudio: true,
   captureMicrophone: true,
+  webResearch: true,
   integrations: [
     { id: "markdown", enabled: false, options: {} },
     { id: "clipboard", enabled: true, options: {} },
@@ -112,6 +113,7 @@ describe("Setup wizard", () => {
     expect(saveSettings).toHaveBeenCalled();
     fireEvent.click(screen.getByLabelText(/Capture system audio/));
     fireEvent.click(screen.getByLabelText(/Capture microphone/));
+    fireEvent.click(screen.getByLabelText(/Enrich notes with web research/));
     fireEvent.click(screen.getByText("Continue")); // step 3
 
     fireEvent.click(screen.getByText("Markdown export")); // toggle integration

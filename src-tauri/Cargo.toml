@@ -10,7 +10,7 @@ name = "halo_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2" }
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
@@ -28,6 +28,7 @@ cpal = "0.15"
 hound = "3"
 uuid = { version = "1", features = ["v4"] }
 anyhow = "1"
+symphonia = { version = "0.5", features = ["mp3", "aac", "isomp4", "wav", "pcm", "flac", "ogg", "vorbis"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }

@@ -17,15 +17,18 @@ afterEach(() => {
 const stopRecording = vi.fn();
 const cancelRecording = vi.fn();
 const startNewRecording = vi.fn();
+const importRecordings = vi.fn();
 
 function setCtx(over: Record<string, unknown>) {
   (useHalo as unknown as Mock).mockReturnValue({
     recording: { status: "idle" },
     currentNote: null,
     level: { rms: 0.9, peak: 0.5 },
+    importing: null,
     stopRecording,
     cancelRecording,
     startNewRecording,
+    importRecordings,
     ...over,
   });
 }
@@ -37,6 +40,30 @@ describe("MainPane", () => {
     expect(screen.getByText("Ready when you are")).toBeTruthy();
     fireEvent.click(screen.getByText("Start recording"));
     expect(startNewRecording).toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Import recordings"));
+    expect(importRecordings).toHaveBeenCalled();
+  });
+
+  it("shows the import progress banner in the empty state", () => {
+    setCtx({ importing: { total: 3, done: 1 } });
+    render(<MainPane />);
+    expect(screen.getByText("Processing recording 2 of 3…")).toBeTruthy();
+  });
+
+  it("shows the import banner alongside transcribing progress", () => {
+    setCtx({
+      recording: { status: "transcribing", noteId: "n", percent: 40 },
+      importing: { total: 2, done: 0 },
+    });
+    render(<MainPane />);
+    expect(screen.getByText("Processing recording 1 of 2…")).toBeTruthy();
+    expect(screen.getByText("Transcribing audio…")).toBeTruthy();
+  });
+
+  it("shows the researching state", () => {
+    setCtx({ recording: { status: "researching", noteId: "n" } });
+    render(<MainPane />);
+    expect(screen.getByText("Researching topics online…")).toBeTruthy();
   });
 
   it("renders the active recording view with controls and a ticking timer", () => {
