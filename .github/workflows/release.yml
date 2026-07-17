@@ -2,15 +2,11 @@ name: Release
 
 # Push a version tag to build and publish a downloadable macOS app:
 #   git tag v0.1.0 && git push origin v0.1.0
-# A universal (Intel + Apple Silicon) .dmg is attached to a GitHub Release.
-# You can also run this manually (workflow_dispatch) as a dry run — it builds
-# the .dmg and uploads it as a workflow artifact without publishing a Release.
-#
-# The inference engines are built natively per architecture (arm64 on Apple
-# Silicon, x86_64 on the Intel runner) because cross-compiling them on one arch
-# fails to link arch-specific system libraries (e.g. OpenSSL). Tauri then lipos
-# the two sidecar sets into a universal bundle; the Rust code (rustls, no
-# OpenSSL) cross-compiles cleanly on a single runner.
+# An Apple Silicon (arm64) .dmg is attached to a GitHub Release. This targets
+# Apple Silicon only — every Mac sold since ~2020 — because GitHub is retiring
+# the Intel macOS runners a universal build would need. You can also run this
+# manually (workflow_dispatch) as a dry run that uploads the .dmg as an artifact
+# without publishing a Release.
 
 on:
   push:
@@ -22,54 +18,12 @@ permissions:
   contents: write
 
 jobs:
-  sidecars:
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - os: macos-latest
-            triple: aarch64-apple-darwin
-          - os: macos-13
-            triple: x86_64-apple-darwin
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v5
-
-      # Cache the compiled engines per architecture so only the first release
-      # pays the build cost. Bump -vN to force a rebuild (newer engine).
-      - name: Cache sidecars
-        id: cache
-        uses: actions/cache@v4
-        with:
-          path: src-tauri/binaries
-          key: sidecars-${{ matrix.triple }}-${{ hashFiles('scripts/fetch-sidecars.sh') }}-v1
-
-      - name: Install CMake
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: brew install cmake
-
-      - name: Build sidecars (${{ matrix.triple }})
-        if: steps.cache.outputs.cache-hit != 'true'
-        env:
-          SIDECAR_TRIPLES: ${{ matrix.triple }}
-        run: bash scripts/fetch-sidecars.sh
-
-      - name: Upload sidecars
-        uses: actions/upload-artifact@v4
-        with:
-          name: sidecars-${{ matrix.triple }}
-          path: src-tauri/binaries/*-${{ matrix.triple }}
-          if-no-files-found: error
-
-  bundle:
-    needs: sidecars
+  macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - uses: actions/setup-node@v5
         with:
@@ -79,18 +33,25 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Download sidecars
-        uses: actions/download-artifact@v4
+      # Cache the compiled engines so only the first release pays the build
+      # cost; later releases restore them in seconds. Bump the -vN suffix to
+      # force a rebuild (e.g. to pick up a newer llama.cpp/whisper.cpp).
+      - name: Cache sidecars
+        id: sidecars
+        uses: actions/cache@v4
         with:
-          pattern: sidecars-*
-          path: sidecars-dl
+          path: src-tauri/binaries
+          key: sidecars-aarch64-apple-darwin-${{ hashFiles('scripts/fetch-sidecars.sh') }}-v1
 
-      - name: Assemble sidecars
-        run: |
-          mkdir -p src-tauri/binaries
-          cp sidecars-dl/*/* src-tauri/binaries/
-          chmod +x src-tauri/binaries/llama-server-* src-tauri/binaries/whisper-cli-*
-          ls -la src-tauri/binaries
+      - name: Install CMake
+        if: steps.sidecars.outputs.cache-hit != 'true'
+        run: brew install cmake
+
+      - name: Build sidecars (llama.cpp + whisper.cpp)
+        if: steps.sidecars.outputs.cache-hit != 'true'
+        env:
+          SIDECAR_TRIPLES: aarch64-apple-darwin
+        run: bash scripts/fetch-sidecars.sh
 
       - name: Install JS dependencies
         run: npm ci
@@ -98,28 +59,28 @@ jobs:
       - name: Build frontend (Vite)
         run: npx vite build
 
-      - name: Build universal macOS app
-        run: npx tauri build --target universal-apple-darwin --bundles dmg
+      - name: Build macOS app (Apple Silicon)
+        run: npx tauri build --bundles dmg
 
       - name: Upload .dmg as artifact (manual dry run)
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: Halo-macos-universal
-          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          name: Halo-macos-arm64
+          path: src-tauri/target/release/bundle/dmg/*.dmg
           if-no-files-found: error
 
       - name: Publish GitHub Release with .dmg (on tag)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          files: src-tauri/target/release/bundle/dmg/*.dmg
           draft: false
           generate_release_notes: true
           body: |
             Halo — local-first AI notetaking app.
 
-            **macOS (universal — Intel + Apple Silicon):** download the `.dmg` below, open it and drag Halo to Applications.
+            **macOS (Apple Silicon / M-series):** download the `.dmg` below, open it and drag Halo to Applications.
 
             This build is unsigned, so on first launch macOS Gatekeeper will block it. Right-click the app → **Open** once (or run `xattr -dr com.apple.quarantine /Applications/Halo.app`), then it opens normally.
 
