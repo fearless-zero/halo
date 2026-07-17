@@ -34,8 +34,8 @@ pub fn specs() -> Vec<ModelSpec> {
             kind: ModelKind::Llm,
             name: "Qwen3-4B Instruct",
             file_name: "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
-            url: "https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
-            approx_size: 2_497_000_000,
+            url: "https://huggingface.co/lmstudio-community/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+            approx_size: 2_497_280_448,
             license: "Apache-2.0",
         },
     ]
