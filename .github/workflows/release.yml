@@ -59,19 +59,39 @@ jobs:
       - name: Build frontend (Vite)
         run: npx vite build
 
-      - name: Build macOS app (Apple Silicon)
+      # Only enable Apple Developer ID signing/notarization when the certificate
+      # secret is actually present. Tauri treats the *presence* of APPLE_* vars
+      # (even empty) as "sign this", so passing empty secrets would fail the
+      # codesign step. Exporting them only when configured keeps unsigned builds
+      # working until the cert is added.
+      - name: Configure Apple signing (when secrets present)
         env:
-          # Minisign key for the auto-updater (required — createUpdaterArtifacts).
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Apple Developer ID signing + notarization (optional — Tauri skips
-          # these steps when the secrets are absent, producing an unsigned app).
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ]; then
+            echo "Apple signing secrets found — enabling codesign + notarization."
+            {
+              echo "APPLE_CERTIFICATE=$APPLE_CERTIFICATE"
+              echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD"
+              echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY"
+              echo "APPLE_ID=$APPLE_ID"
+              echo "APPLE_PASSWORD=$APPLE_PASSWORD"
+              echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"
+            } >> "$GITHUB_ENV"
+          else
+            echo "No Apple certificate secret — building unsigned (Gatekeeper right-click-open)."
+          fi
+
+      - name: Build macOS app (Apple Silicon)
+        env:
+          # Minisign key for the auto-updater (required — createUpdaterArtifacts).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build
 
       - name: Assemble release files + update manifest
