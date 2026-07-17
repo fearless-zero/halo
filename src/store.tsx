@@ -9,6 +9,7 @@ import {
 } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, events } from "./ipc";
+import { checkForUpdate, type PendingUpdate } from "./updater";
 import type {
   AppStatus,
   AudioLevel,
@@ -37,6 +38,10 @@ interface HaloState {
   streamBuffer: string;
   /** Non-null while a batch of imported recordings is being processed. */
   importing: ImportProgress | null;
+  /** A newer signed release is available to install, if any. */
+  update: PendingUpdate | null;
+  /** True while an update is downloading/installing. */
+  installingUpdate: boolean;
   error: string | null;
 }
 
@@ -56,6 +61,8 @@ interface HaloActions {
   updateNoteTitle: (title: string) => void;
   persistCurrentNote: () => Promise<void>;
   deleteNote: (id: string) => Promise<void>;
+  installUpdate: () => Promise<void>;
+  dismissUpdate: () => void;
   clearError: () => void;
 }
 
@@ -81,6 +88,8 @@ export function HaloProvider({ children }: { children: ReactNode }) {
   const [level, setLevel] = useState<AudioLevel>({ rms: 0, peak: 0 });
   const [streamBuffer, setStreamBuffer] = useState("");
   const [importing, setImporting] = useState<ImportProgress | null>(null);
+  const [update, setUpdate] = useState<PendingUpdate | null>(null);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Track the note currently being recorded/processed so event handlers that
@@ -112,6 +121,8 @@ export function HaloProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void refreshAll();
+    // Silently check for a newer signed release; ignore failures (offline etc).
+    void checkForUpdate().then(setUpdate).catch(() => {});
     const unsubs: Array<Promise<() => void>> = [
       events.onAudioLevel(setLevel),
       events.onTranscribeProgress((p) => {
@@ -293,6 +304,19 @@ export function HaloProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const installUpdate = async () => {
+    if (!update) return;
+    setInstallingUpdate(true);
+    try {
+      await update.install();
+    } catch (e) {
+      fail(e);
+      setInstallingUpdate(false);
+    }
+  };
+
+  const dismissUpdate = () => setUpdate(null);
+
   const value = useMemo<HaloContextValue>(
     () => ({
       status,
@@ -306,6 +330,8 @@ export function HaloProvider({ children }: { children: ReactNode }) {
       level,
       streamBuffer,
       importing,
+      update,
+      installingUpdate,
       error,
       refreshAll,
       saveSettings,
@@ -322,9 +348,11 @@ export function HaloProvider({ children }: { children: ReactNode }) {
       updateNoteTitle,
       persistCurrentNote,
       deleteNote,
+      installUpdate,
+      dismissUpdate,
       clearError: () => setError(null),
     }),
-    [status, settings, models, styles, notes, currentNote, view, recording, level, streamBuffer, importing, error],
+    [status, settings, models, styles, notes, currentNote, view, recording, level, streamBuffer, importing, update, installingUpdate, error],
   );
 
   return <HaloContext.Provider value={value}>{children}</HaloContext.Provider>;

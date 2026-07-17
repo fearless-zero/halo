@@ -2,6 +2,7 @@ import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+vi.mock("./updater", () => ({ checkForUpdate: vi.fn() }));
 
 vi.mock("./ipc", () => ({
   api: {
@@ -32,6 +33,7 @@ vi.mock("./ipc", () => ({
 }));
 
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { checkForUpdate } from "./updater";
 import { api, events } from "./ipc";
 import { HaloProvider, useHalo } from "./store";
 import type { Note, Settings } from "./types";
@@ -105,6 +107,7 @@ beforeEach(() => {
     { ...baseNote, id: "imp2", title: "Class 2" },
   ]);
   m(openDialog).mockResolvedValue(["/recordings/class1.m4a", "/recordings/class2.m4a"]);
+  m(checkForUpdate).mockResolvedValue(null);
   m(api.saveNote).mockImplementation((note: Note) => Promise.resolve(note));
   m(api.deleteNote).mockResolvedValue(undefined);
   m(api.cancelRecording).mockResolvedValue(undefined);
@@ -436,6 +439,57 @@ describe("import recordings", () => {
       await ctx.importRecordings();
     });
     expect(openDialog).not.toHaveBeenCalled();
+  });
+});
+
+describe("auto-update", () => {
+  it("surfaces an available update found on load", async () => {
+    const install = vi.fn().mockResolvedValue(undefined);
+    m(checkForUpdate).mockResolvedValue({ version: "0.9.0", install });
+    await mount();
+    expect(ctx.update?.version).toBe("0.9.0");
+
+    await act(async () => {
+      await ctx.installUpdate();
+    });
+    expect(install).toHaveBeenCalled();
+    expect(ctx.installingUpdate).toBe(true);
+  });
+
+  it("has no update when the check finds none", async () => {
+    await mount();
+    expect(ctx.update).toBeNull();
+    // installUpdate is a no-op with nothing pending.
+    await act(async () => {
+      await ctx.installUpdate();
+    });
+    expect(ctx.installingUpdate).toBe(false);
+  });
+
+  it("captures an install failure and clears the installing flag", async () => {
+    const install = vi.fn().mockRejectedValue(new Error("update boom"));
+    m(checkForUpdate).mockResolvedValue({ version: "1.0.0", install });
+    await mount();
+    await act(async () => {
+      await ctx.installUpdate();
+    });
+    expect(ctx.error).toBe("update boom");
+    expect(ctx.installingUpdate).toBe(false);
+  });
+
+  it("dismisses an available update", async () => {
+    m(checkForUpdate).mockResolvedValue({ version: "0.9.0", install: vi.fn() });
+    await mount();
+    expect(ctx.update?.version).toBe("0.9.0");
+    act(() => ctx.dismissUpdate());
+    expect(ctx.update).toBeNull();
+  });
+
+  it("ignores update-check failures", async () => {
+    m(checkForUpdate).mockRejectedValue(new Error("offline"));
+    await mount();
+    expect(ctx.update).toBeNull();
+    expect(ctx.error).toBeNull();
   });
 });
 

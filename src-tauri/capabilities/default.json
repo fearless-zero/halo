@@ -9,6 +9,8 @@
     "dialog:default",
     "clipboard-manager:allow-write-text",
     "clipboard-manager:allow-read-text",
+    "updater:default",
+    "process:default",
     "shell:allow-kill",
     {
       "identifier": "shell:allow-execute",

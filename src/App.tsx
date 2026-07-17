@@ -6,6 +6,28 @@ import { MainPane } from "./components/MainPane";
 import { SettingsPanel } from "./screens/Settings";
 import "./App.css";
 
+function UpdateBanner() {
+  const { update, installUpdate, dismissUpdate, installingUpdate } = useHalo();
+  if (!update) return null;
+  return (
+    <div className="update-banner">
+      <span>Halo {update.version} is available.</span>
+      <div className="update-actions">
+        <button
+          className="btn btn-sm btn-primary"
+          disabled={installingUpdate}
+          onClick={() => void installUpdate()}
+        >
+          {installingUpdate ? "Installing…" : "Install & restart"}
+        </button>
+        <button className="btn btn-sm btn-ghost" disabled={installingUpdate} onClick={dismissUpdate}>
+          Later
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Shell() {
   const { view, error, clearError } = useHalo();
   const [showSettings, setShowSettings] = useState(false);
@@ -25,6 +47,7 @@ function Shell() {
 
   return (
     <div className="layout">
+      <UpdateBanner />
       <Sidebar onOpenSettings={() => setShowSettings(true)} />
       <MainPane />
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}

@@ -60,21 +60,64 @@ jobs:
         run: npx vite build
 
       - name: Build macOS app (Apple Silicon)
-        run: npx tauri build --bundles dmg
+        env:
+          # Minisign key for the auto-updater (required — createUpdaterArtifacts).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Apple Developer ID signing + notarization (optional — Tauri skips
+          # these steps when the secrets are absent, producing an unsigned app).
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx tauri build
 
-      - name: Upload .dmg as artifact (manual dry run)
+      - name: Assemble release files + update manifest
+        id: pkg
+        run: |
+          set -euo pipefail
+          OUT=dist-release
+          mkdir -p "$OUT"
+          DMG="$(ls src-tauri/target/release/bundle/dmg/*.dmg | head -1)"
+          TARGZ="$(ls src-tauri/target/release/bundle/macos/*.app.tar.gz | head -1)"
+          cp "$DMG" "$OUT/"
+          cp "$TARGZ" "$OUT/Halo.app.tar.gz"
+          TAG="${GITHUB_REF_NAME}"
+          VER="${TAG#v}"
+          SIG="$(cat "${TARGZ}.sig")"
+          cat > "$OUT/latest.json" <<JSON
+          {
+            "version": "$VER",
+            "notes": "Halo $VER",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "$SIG",
+                "url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/Halo.app.tar.gz"
+              }
+            }
+          }
+          JSON
+          ls -la "$OUT"
+
+      - name: Upload artifacts (manual dry run)
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: Halo-macos-arm64
-          path: src-tauri/target/release/bundle/dmg/*.dmg
+          path: dist-release/*
           if-no-files-found: error
 
-      - name: Publish GitHub Release with .dmg (on tag)
+      - name: Publish GitHub Release (on tag)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: src-tauri/target/release/bundle/dmg/*.dmg
+          files: |
+            dist-release/*.dmg
+            dist-release/Halo.app.tar.gz
+            dist-release/latest.json
           draft: false
           generate_release_notes: true
           body: |

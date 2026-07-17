@@ -22,8 +22,19 @@ import { useHalo } from "./store";
 afterEach(cleanup);
 
 const clearError = vi.fn();
+const installUpdate = vi.fn();
+const dismissUpdate = vi.fn();
 function setCtx(over: Record<string, unknown>) {
-  (useHalo as unknown as Mock).mockReturnValue({ view: "home", error: null, clearError, ...over });
+  (useHalo as unknown as Mock).mockReturnValue({
+    view: "home",
+    error: null,
+    clearError,
+    update: null,
+    installingUpdate: false,
+    installUpdate,
+    dismissUpdate,
+    ...over,
+  });
 }
 
 describe("App shell", () => {
@@ -55,5 +66,28 @@ describe("App shell", () => {
     expect(screen.getByText("something broke")).toBeTruthy();
     fireEvent.click(screen.getByText("something broke"));
     expect(clearError).toHaveBeenCalled();
+  });
+
+  it("hides the update banner when no update is pending", () => {
+    setCtx({ view: "home" });
+    render(<App />);
+    expect(screen.queryByText(/is available/)).toBeNull();
+  });
+
+  it("shows the update banner and installs or dismisses", () => {
+    setCtx({ view: "home", update: { version: "0.3.0", install: vi.fn() } });
+    render(<App />);
+    expect(screen.getByText("Halo 0.3.0 is available.")).toBeTruthy();
+    fireEvent.click(screen.getByText("Install & restart"));
+    expect(installUpdate).toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Later"));
+    expect(dismissUpdate).toHaveBeenCalled();
+  });
+
+  it("shows an installing state in the update banner", () => {
+    setCtx({ view: "home", update: { version: "0.3.0", install: vi.fn() }, installingUpdate: true });
+    render(<App />);
+    expect(screen.getByText("Installing…")).toBeTruthy();
+    expect((screen.getByText("Installing…") as HTMLButtonElement).disabled).toBe(true);
   });
 });
